@@ -1,0 +1,27 @@
+{
+  "name": "lifetracker",
+  "private": true,
+  "workspaces": [
+    "apps/web"
+  ],
+  "scripts": {
+    "predev": "node scripts/ensure-dev-env.mjs",
+    "dev": "concurrently --kill-others-on-fail --names API,WEB --prefix-colors cyan,green \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": ".\\apps\\api\\.venv\\Scripts\\alembic.exe -c apps/api/alembic.ini upgrade head && .\\apps\\api\\.venv\\Scripts\\uvicorn.exe lifetracker.main:app --app-dir apps/api/src --env-file apps/api/.env.local --reload --port 8000",
+    "dev:web": "npm run dev --workspace @lifetracker/web",
+    "build": "npm run build:web",
+    "build:web": "npm run build --workspace @lifetracker/web",
+    "lint": "npm run lint:web",
+    "lint:web": "npm run lint --workspace @lifetracker/web",
+    "typecheck": "npm run typecheck:web",
+    "typecheck:web": "npm run typecheck --workspace @lifetracker/web",
+    "test": "npm run test:web",
+    "test:web": "npm run test --workspace @lifetracker/web"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "concurrently": "10.0.5"
+  }
+}
