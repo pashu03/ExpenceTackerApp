@@ -59,6 +59,7 @@ export function LoginForm() {
       <Input
         label="Password"
         type="password"
+        revealable
         autoComplete="current-password"
         placeholder="Your password"
         error={errors.password?.message}
@@ -72,4 +73,3 @@ export function LoginForm() {
     </form>
   );
 }
-

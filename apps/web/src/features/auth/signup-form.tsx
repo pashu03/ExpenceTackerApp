@@ -7,22 +7,21 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
 import { ApiError } from "@/lib/api-client";
 import { useAuth } from "./auth-provider";
 
 const signupSchema = z
   .object({
     name: z.string().trim().min(2, "Enter your name.").max(100),
-    email: z.email("Enter a valid email address."),
+    email: z
+      .email("Enter a valid email address.")
+      .refine((value) => value === value.toLowerCase(), "Use lowercase letters only."),
     password: z
       .string()
-      .min(10, "Use at least 10 characters.")
+      .min(8, "Use at least 8 characters.")
       .regex(/[A-Za-z]/, "Include at least one letter.")
       .regex(/\d/, "Include at least one number."),
     confirmPassword: z.string(),
-    currency_code: z.string().length(3),
-    timezone: z.string().min(1),
   })
   .refine((values) => values.password === values.confirmPassword, {
     message: "Passwords do not match.",
@@ -34,7 +33,6 @@ type SignupValues = z.infer<typeof signupSchema>;
 export function SignupForm() {
   const { register: createAccount } = useAuth();
   const router = useRouter();
-  const detectedTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Kolkata";
   const {
     register,
     handleSubmit,
@@ -42,7 +40,6 @@ export function SignupForm() {
     formState: { errors, isSubmitting },
   } = useForm<SignupValues>({
     resolver: zodResolver(signupSchema),
-    defaultValues: { currency_code: "INR", timezone: detectedTimezone },
   });
 
   const submit = handleSubmit(async (values) => {
@@ -51,8 +48,6 @@ export function SignupForm() {
         name: values.name,
         email: values.email,
         password: values.password,
-        currency_code: values.currency_code,
-        timezone: values.timezone,
       });
       router.replace("/dashboard");
     } catch (error) {
@@ -74,35 +69,25 @@ export function SignupForm() {
         label="Email"
         type="email"
         autoComplete="email"
+        autoCapitalize="none"
+        spellCheck={false}
         placeholder="you@example.com"
         error={errors.email?.message}
         {...register("email")}
       />
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Select label="Currency" error={errors.currency_code?.message} {...register("currency_code")}>
-          <option value="INR">INR — ₹</option>
-          <option value="USD">USD — $</option>
-          <option value="EUR">EUR — €</option>
-          <option value="GBP">GBP — £</option>
-        </Select>
-        <Input
-          label="Timezone"
-          error={errors.timezone?.message}
-          readOnly
-          {...register("timezone")}
-        />
-      </div>
       <Input
         label="Password"
         type="password"
+        revealable
         autoComplete="new-password"
-        hint="At least 10 characters with a letter and number."
+        hint="At least 8 characters with a letter and number."
         error={errors.password?.message}
         {...register("password")}
       />
       <Input
         label="Confirm password"
         type="password"
+        revealable
         autoComplete="new-password"
         error={errors.confirmPassword?.message}
         {...register("confirmPassword")}

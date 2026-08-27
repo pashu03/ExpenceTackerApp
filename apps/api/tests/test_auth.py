@@ -6,8 +6,6 @@ REGISTER_PAYLOAD = {
     "name": "Aarav Sharma",
     "email": "aarav@example.com",
     "password": "securepass123",
-    "currency_code": "INR",
-    "timezone": "Asia/Kolkata",
 }
 
 
@@ -41,6 +39,33 @@ async def test_duplicate_registration_is_rejected(client: AsyncClient) -> None:
 
     assert response.status_code == 409
     assert response.json()["code"] == "EMAIL_ALREADY_REGISTERED"
+
+
+async def test_registration_rejects_uppercase_email(client: AsyncClient) -> None:
+    response = await client.post(
+        "/api/v1/auth/register",
+        json={**REGISTER_PAYLOAD, "email": "Aarav@example.com"},
+    )
+
+    assert response.status_code == 422
+
+
+async def test_registration_requires_eight_character_password(client: AsyncClient) -> None:
+    response = await client.post(
+        "/api/v1/auth/register",
+        json={**REGISTER_PAYLOAD, "password": "abc1234"},
+    )
+
+    assert response.status_code == 422
+
+
+async def test_registration_accepts_eight_character_password(client: AsyncClient) -> None:
+    response = await client.post(
+        "/api/v1/auth/register",
+        json={**REGISTER_PAYLOAD, "password": "abcde123"},
+    )
+
+    assert response.status_code == 201
 
 
 async def test_login_rejects_invalid_password_without_revealing_account(

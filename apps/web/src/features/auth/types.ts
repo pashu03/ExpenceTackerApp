@@ -28,7 +28,4 @@ export interface LoginInput {
 
 export interface RegisterInput extends LoginInput {
   name: string;
-  currency_code: string;
-  timezone: string;
 }
-

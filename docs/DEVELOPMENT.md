@@ -74,8 +74,8 @@ npm.cmd run build:web
 
 ## Authentication smoke test
 
-1. Open `/signup` and create an account using a password with at least 10 characters, one letter, and one number.
-2. Confirm the dashboard displays the submitted first name and selected currency.
+1. Open `/signup` and create an account using a lowercase email and a password with at least 8 characters, one letter, and one number.
+2. Confirm the dashboard displays the submitted first name and the default INR currency.
 3. Sign out from the navigation footer/header.
 4. Confirm a direct visit to `/dashboard` redirects to `/login`.
 5. Sign in with the created account.
@@ -108,6 +108,15 @@ are handled by FastAPI; all other routes are handled by Next.js.
    ```
 
 5. Push the deployment commit or redeploy the latest commit in Vercel.
+6. Verify API routing and database readiness from the repository root:
+
+   ```powershell
+   npm.cmd run check:deployment -- https://your-production-domain
+   ```
+
+   All three checks must report `PASS`. A 404 means the project is not using the
+   Services framework/root configuration. A 503 from `/health/ready` means the
+   database URL or migrations are not ready.
 
 `NEXT_PUBLIC_API_URL` is optional for this same-origin deployment. If it is not set, the
 production web build uses `/api/v1`. Remove any old value that points to `localhost` or a
