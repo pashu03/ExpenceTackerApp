@@ -96,6 +96,12 @@ are handled by FastAPI; all other routes are handled by Next.js.
    - `JWT_SECRET=<at least 32 random characters>`
    - `COOKIE_SECURE=true`
    - `CORS_ORIGINS=["https://your-production-domain"]`
+   - `NEXT_PUBLIC_API_URL=/api/v1`
+
+   For Supabase, copy the **Session Pooler** connection string (port `5432`) from
+   **Supabase > Connect** and replace its scheme with `postgresql+asyncpg://`. Do not use
+   the direct `db.<project-ref>.supabase.co` address from Vercel because that endpoint is
+   IPv6-only by default. `CORS_ORIGINS` must contain a plain URL, not Markdown link syntax.
 4. Apply the database migrations using the same production `DATABASE_URL` before the first
    production request:
 
@@ -106,6 +112,9 @@ are handled by FastAPI; all other routes are handled by Next.js.
    $env:COOKIE_SECURE = "true"
    .\apps\api\.venv\Scripts\python.exe -m alembic -c apps/api/alembic.ini upgrade head
    ```
+
+   Alternatively, for a new Supabase database, run `docs/supabase-schema.sql` once in
+   **Supabase > SQL Editor**. Use either Alembic or the SQL script, not both.
 
 5. Push the deployment commit or redeploy the latest commit in Vercel.
 6. Verify API routing and database readiness from the repository root:
@@ -118,6 +127,6 @@ are handled by FastAPI; all other routes are handled by Next.js.
    Services framework/root configuration. A 503 from `/health/ready` means the
    database URL or migrations are not ready.
 
-`NEXT_PUBLIC_API_URL` is optional for this same-origin deployment. If it is not set, the
-production web build uses `/api/v1`. Remove any old value that points to `localhost` or a
-frontend-only Vercel URL with no backend service.
+The production web build always uses the same-origin `/api/v1` route. Remove any Vercel
+`NEXT_PUBLIC_API_URL` value that points to `localhost`, is empty, or contains only the
+frontend origin. If you keep the variable for documentation, set it to `/api/v1`.
