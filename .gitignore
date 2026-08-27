@@ -1,6 +1,7 @@
 # JavaScript
 node_modules/
 .next/
+.vercel/
 out/
 coverage/
 *.tsbuildinfo

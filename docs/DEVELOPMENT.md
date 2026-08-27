@@ -35,8 +35,8 @@ From `apps/api` in PowerShell:
 python -m venv .venv
 python -m pip --python .venv install --upgrade pip
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
-.\.venv\Scripts\alembic.exe upgrade head
-.\.venv\Scripts\uvicorn.exe lifetracker.main:app --reload --port 8000
+.\.venv\Scripts\python.exe -m alembic upgrade head
+.\.venv\Scripts\python.exe -m uvicorn lifetracker.main:app --reload --port 8000
 ```
 
 API documentation is available at `http://localhost:8000/docs` in development. Health endpoints are `/health` and `/health/ready`.
@@ -82,3 +82,33 @@ npm.cmd run build:web
 6. Confirm an invalid password returns a generic error and does not reveal whether an email exists.
 
 Access tokens are short-lived JWTs in HTTP-only cookies. Refresh tokens are random, hashed in the database, rotated during refresh, and revocable on logout. Unsafe authenticated requests require the matching CSRF header and cookie.
+
+## Vercel deployment
+
+The repository deploys as two Vercel Services behind one origin. `/api/*` and `/health*`
+are handled by FastAPI; all other routes are handled by Next.js.
+
+1. Keep the Vercel project Root Directory at the repository root (leave it blank).
+2. In Project Settings > Build and Deployment, set Framework Preset to **Services**.
+3. Add these production environment variables to Vercel:
+   - `ENVIRONMENT=production`
+   - `DATABASE_URL=<managed PostgreSQL asyncpg URL>`
+   - `JWT_SECRET=<at least 32 random characters>`
+   - `COOKIE_SECURE=true`
+   - `CORS_ORIGINS=["https://your-production-domain"]`
+4. Apply the database migrations using the same production `DATABASE_URL` before the first
+   production request:
+
+   ```powershell
+   $env:DATABASE_URL = "postgresql+asyncpg://..."
+   $env:ENVIRONMENT = "production"
+   $env:JWT_SECRET = "your-production-secret"
+   $env:COOKIE_SECURE = "true"
+   .\apps\api\.venv\Scripts\python.exe -m alembic -c apps/api/alembic.ini upgrade head
+   ```
+
+5. Push the deployment commit or redeploy the latest commit in Vercel.
+
+`NEXT_PUBLIC_API_URL` is optional for this same-origin deployment. If it is not set, the
+production web build uses `/api/v1`. Remove any old value that points to `localhost` or a
+frontend-only Vercel URL with no backend service.

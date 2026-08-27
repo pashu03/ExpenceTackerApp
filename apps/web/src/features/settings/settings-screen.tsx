@@ -229,7 +229,7 @@ export function SettingsScreen() {
         </CardHeader>
         <CardContent className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <p className="max-w-2xl text-sm leading-6 text-[var(--text-muted)]">Sign out when using a shared device. Account deletion and full data export should be added with password confirmation before public release.</p>
-          <Button variant="danger" className="shrink-0" onClick={signOut}><LogOut size={18} /> Sign out of this device</Button>
+          <Button variant="danger" className="shrink-0" onClick={signOut}><LogOut size={20} /> Sign out of this device</Button>
         </CardContent>
       </Card>
     </div>

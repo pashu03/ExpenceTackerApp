@@ -112,7 +112,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               aria-label="Sign out"
               title="Sign out"
             >
-              <LogOut size={20} />
+              <LogOut size={30} />
             </Button>
           </div>
         </div>
@@ -150,18 +150,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </div>
                 <Button
                   variant="ghost"
-                  className="size-10 shrink-0 px-0 text-[var(--text-muted)] hover:text-[var(--danger)]"
+                  className="size-100 shrink-0 px-0 text-[var(--text-muted)] hover:text-[var(--danger)]"
                   onClick={signOut}
                   aria-label="Sign out"
                   title="Sign out"
                 >
-                  <LogOut size={20} />
+                  <LogOut size={109} />
                 </Button>
               </div>
             </div>
           </aside>
         </div>
-      ) : null}
+      ) : null} 
 
       <div className="min-w-0 lg:col-start-2">
         <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-[var(--border)] bg-[color-mix(in_srgb,var(--background)_88%,transparent)] px-4 backdrop-blur-xl sm:px-6 lg:px-8">
@@ -180,7 +180,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="flex items-center gap-1">
             <ThemeToggle />
             <Button variant="ghost" className="size-11 px-0 lg:hidden" onClick={signOut} aria-label="Sign out">
-              <LogOut size={19} />
+              <LogOut size={22} />
             </Button>
           </div>
         </header>
