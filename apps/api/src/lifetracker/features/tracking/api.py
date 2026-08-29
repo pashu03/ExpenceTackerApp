@@ -6,8 +6,19 @@ from typing import Annotated
 from fastapi import APIRouter, Query, status
 
 from lifetracker.features.auth.dependencies import CurrentUser, SessionDependency
-from lifetracker.features.tracking.models import Expense, FinancialGoal, Income, JournalEntry
+from lifetracker.features.tracking.models import (
+    Budget,
+    Expense,
+    FinancialGoal,
+    Income,
+    JournalEntry,
+    Reminder,
+)
 from lifetracker.features.tracking.schemas import (
+    BudgetInput,
+    BudgetListResponse,
+    BudgetResponse,
+    BudgetUpdate,
     ExpenseInput,
     ExpenseListResponse,
     ExpenseRead,
@@ -30,6 +41,11 @@ from lifetracker.features.tracking.schemas import (
     MessageData,
     MessageResponse,
     MonthlySummaryResponse,
+    ReminderInput,
+    ReminderListResponse,
+    ReminderRead,
+    ReminderResponse,
+    ReminderUpdate,
 )
 from lifetracker.features.tracking.service import TrackingService
 
@@ -38,7 +54,7 @@ MonthQuery = Annotated[str | None, Query(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")]
 
 
 def service(session: SessionDependency, current_user: CurrentUser) -> TrackingService:
-    return TrackingService(session, current_user.id)
+    return TrackingService(session, current_user.id, current_user.preferences.timezone)
 
 
 @router.get("/expenses", response_model=ExpenseListResponse)
@@ -147,9 +163,7 @@ async def delete_journal(
 
 
 @router.get("/goals", response_model=GoalListResponse)
-async def list_goals(
-    session: SessionDependency, current_user: CurrentUser
-) -> GoalListResponse:
+async def list_goals(session: SessionDependency, current_user: CurrentUser) -> GoalListResponse:
     tracking = service(session, current_user)
     items = await tracking.list_goals()
     return GoalListResponse(data=[tracking.goal_read(item) for item in items])
@@ -180,6 +194,75 @@ async def delete_goal(
 ) -> MessageResponse:
     await service(session, current_user).delete(FinancialGoal, entity_id)
     return MessageResponse(data=MessageData(message="Goal deleted."))
+
+
+@router.get("/budgets", response_model=BudgetListResponse)
+async def list_budgets(
+    session: SessionDependency, current_user: CurrentUser, month: MonthQuery = None
+) -> BudgetListResponse:
+    return BudgetListResponse(data=await service(session, current_user).list_budgets(month))
+
+
+@router.post("/budgets", response_model=BudgetResponse, status_code=status.HTTP_201_CREATED)
+async def create_budget(
+    payload: BudgetInput, session: SessionDependency, current_user: CurrentUser
+) -> BudgetResponse:
+    return BudgetResponse(data=await service(session, current_user).create_budget(payload))
+
+
+@router.patch("/budgets/{entity_id}", response_model=BudgetResponse)
+async def update_budget(
+    entity_id: uuid.UUID,
+    payload: BudgetUpdate,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> BudgetResponse:
+    return BudgetResponse(
+        data=await service(session, current_user).update_budget(entity_id, payload)
+    )
+
+
+@router.delete("/budgets/{entity_id}", response_model=MessageResponse)
+async def delete_budget(
+    entity_id: uuid.UUID, session: SessionDependency, current_user: CurrentUser
+) -> MessageResponse:
+    await service(session, current_user).delete(Budget, entity_id)
+    return MessageResponse(data=MessageData(message="Budget deleted."))
+
+
+@router.get("/reminders", response_model=ReminderListResponse)
+async def list_reminders(
+    session: SessionDependency, current_user: CurrentUser, month: MonthQuery = None
+) -> ReminderListResponse:
+    items = await service(session, current_user).list_reminders(month)
+    return ReminderListResponse(data=[ReminderRead.model_validate(item) for item in items])
+
+
+@router.post("/reminders", response_model=ReminderResponse, status_code=status.HTTP_201_CREATED)
+async def create_reminder(
+    payload: ReminderInput, session: SessionDependency, current_user: CurrentUser
+) -> ReminderResponse:
+    item = await service(session, current_user).create_reminder(payload)
+    return ReminderResponse(data=ReminderRead.model_validate(item))
+
+
+@router.patch("/reminders/{entity_id}", response_model=ReminderResponse)
+async def update_reminder(
+    entity_id: uuid.UUID,
+    payload: ReminderUpdate,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> ReminderResponse:
+    item = await service(session, current_user).update_reminder(entity_id, payload)
+    return ReminderResponse(data=ReminderRead.model_validate(item))
+
+
+@router.delete("/reminders/{entity_id}", response_model=MessageResponse)
+async def delete_reminder(
+    entity_id: uuid.UUID, session: SessionDependency, current_user: CurrentUser
+) -> MessageResponse:
+    await service(session, current_user).delete(Reminder, entity_id)
+    return MessageResponse(data=MessageData(message="Reminder deleted."))
 
 
 @router.get("/dashboard/summary", response_model=MonthlySummaryResponse)

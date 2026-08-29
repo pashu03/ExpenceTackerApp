@@ -25,7 +25,7 @@ After installing dependencies, run both services from the repository root:
 npm.cmd run dev
 ```
 
-The first run creates ignored `.env.local` files with a random development secret, applies database migrations, starts the API on port 8000, and starts the web application on port 3000. Next.js will choose another available web port if 3000 is already occupied.
+The first run creates ignored `.env.local` files with a random development secret, applies database migrations, starts the API on port 8010, and starts the web application on port 3000. Next.js will choose another available web port if 3000 is already occupied.
 
 ## API setup
 
@@ -36,10 +36,12 @@ python -m venv .venv
 python -m pip --python .venv install --upgrade pip
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
 .\.venv\Scripts\python.exe -m alembic upgrade head
-.\.venv\Scripts\python.exe -m uvicorn lifetracker.main:app --reload --port 8000
+.\.venv\Scripts\python.exe -m uvicorn lifetracker.main:app --port 8010
 ```
 
-API documentation is available at `http://localhost:8000/docs` in development. Health endpoints are `/health` and `/health/ready`.
+API documentation is available at `http://localhost:8010/docs` in development. Health endpoints are `/health` and `/health/ready`.
+The root launcher intentionally runs the API without Uvicorn auto-reload because some managed
+Windows devices block its subprocess. Restart `npm.cmd run dev` after changing Python code.
 
 ## Web setup
 
@@ -93,15 +95,29 @@ are handled by FastAPI; all other routes are handled by Next.js.
 3. Add these production environment variables to Vercel:
    - `ENVIRONMENT=production`
    - `DATABASE_URL=<managed PostgreSQL asyncpg URL>`
+   - `DATABASE_POOL_SIZE=2`
+   - `DATABASE_MAX_OVERFLOW=1`
+   - `DATABASE_USE_NULL_POOL=true`
    - `JWT_SECRET=<at least 32 random characters>`
    - `COOKIE_SECURE=true`
    - `CORS_ORIGINS=["https://your-production-domain"]`
    - `NEXT_PUBLIC_API_URL=/api/v1`
+   - `SMTP_HOST=<your email provider SMTP host>`
+   - `SMTP_PORT=587`
+   - `SMTP_USERNAME=<your email provider username>`
+   - `SMTP_PASSWORD=<your email provider password or API key>`
+   - `SMTP_FROM_EMAIL=<verified sender address>`
+   - `SMTP_USE_TLS=true`
 
-   For Supabase, copy the **Session Pooler** connection string (port `5432`) from
-   **Supabase > Connect** and replace its scheme with `postgresql+asyncpg://`. Do not use
-   the direct `db.<project-ref>.supabase.co` address from Vercel because that endpoint is
-   IPv6-only by default. `CORS_ORIGINS` must contain a plain URL, not Markdown link syntax.
+   For Supabase, copy the **Session Pooler** connection string (the `aws-...pooler.supabase.com`
+   host on port `5432`) from **Supabase > Connect** and replace its scheme with
+   `postgresql+asyncpg://`. `DATABASE_USE_NULL_POOL=true` ensures serverless instances release
+   their database connections. Do not use the direct `db.<project-ref>.supabase.co` address
+   from Vercel because that endpoint is IPv6-only by default. Do not use the transaction
+   pooler with this asyncpg configuration because it does not support prepared statements.
+   `CORS_ORIGINS` must contain a plain URL, not Markdown link syntax.
+   The SMTP variables are required for Forgot Password in production. Use a verified sender
+   from an SMTP provider; never use your personal mailbox password.
 4. Apply the database migrations using the same production `DATABASE_URL` before the first
    production request:
 
@@ -114,7 +130,11 @@ are handled by FastAPI; all other routes are handled by Next.js.
    ```
 
    Alternatively, for a new Supabase database, run `docs/supabase-schema.sql` once in
-   **Supabase > SQL Editor**. Use either Alembic or the SQL script, not both.
+   **Supabase > SQL Editor**. If the database was created with the older schema through
+   revision `20260825_0002`, first run `docs/supabase-upgrade-0003.sql` and then
+   `docs/supabase-upgrade-0004.sql`. If it is already at revision `20260828_0003`, run only
+   `docs/supabase-upgrade-0004.sql`. Use either Alembic or the SQL scripts for a revision,
+   not both.
 
 5. Push the deployment commit or redeploy the latest commit in Vercel.
 6. Verify API routing and database readiness from the repository root:
@@ -130,3 +150,8 @@ are handled by FastAPI; all other routes are handled by Next.js.
 The production web build always uses the same-origin `/api/v1` route. Remove any Vercel
 `NEXT_PUBLIC_API_URL` value that points to `localhost`, is empty, or contains only the
 frontend origin. If you keep the variable for documentation, set it to `/api/v1`.
+
+After changing any Vercel environment variable, redeploy the latest commit. Confirm both
+`/health` (application running) and `/health/ready` (database reachable and migrated) before
+testing registration. A successful `/health` with a failing `/health/ready` is a database
+connection or schema problem, not a CORS problem.

@@ -3,7 +3,7 @@
 import {
   BarChart3,
   BookHeart,
-  Bot,
+  Lightbulb,
   CalendarDays,
   CircleDollarSign,
   Goal,
@@ -36,7 +36,7 @@ const desktopNavigation = [
   { href: "/calendar", label: "Calendar", icon: CalendarDays },
   { href: "/goals", label: "Goals", icon: Goal },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
-  { href: "/insights", label: "AI Insights", icon: Bot },
+  { href: "/insights", label: "Insights", icon: Lightbulb },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 

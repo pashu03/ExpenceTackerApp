@@ -3,9 +3,15 @@ from __future__ import annotations
 import re
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
 from lifetracker.features.users.schemas import UserRead
+
+
+def strong_password(value: str) -> str:
+    if not re.search(r"[A-Za-z]", value) or not re.search(r"\d", value):
+        raise ValueError("Password must contain at least one letter and one number")
+    return value
 
 
 class RegisterRequest(BaseModel):
@@ -33,9 +39,7 @@ class RegisterRequest(BaseModel):
     @field_validator("password")
     @classmethod
     def validate_password_strength(cls, value: str) -> str:
-        if not re.search(r"[A-Za-z]", value) or not re.search(r"\d", value):
-            raise ValueError("Password must contain at least one letter and one number")
-        return value
+        return strong_password(value)
 
     @field_validator("currency_code")
     @classmethod
@@ -60,12 +64,56 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=1, max_length=128)
 
 
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    email: EmailStr
+    code: str = Field(pattern=r"^\d{6}$")
+    new_password: str = Field(min_length=8, max_length=128)
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_password_strength(cls, value: str) -> str:
+        return strong_password(value)
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_password_strength(cls, value: str) -> str:
+        return strong_password(value)
+
+    @model_validator(mode="after")
+    def password_must_change(self) -> ChangePasswordRequest:
+        if self.current_password == self.new_password:
+            raise ValueError("New password must be different from the current password")
+        return self
+
+
+class DeleteAccountRequest(BaseModel):
+    password: str = Field(min_length=1, max_length=128)
+    confirmation: str
+
+    @field_validator("confirmation")
+    @classmethod
+    def confirm_deletion(cls, value: str) -> str:
+        if value != "DELETE":
+            raise ValueError('Type "DELETE" to confirm account deletion')
+        return value
+
+
 class AuthResponse(BaseModel):
     data: UserRead
 
 
 class MessageData(BaseModel):
     message: str
+    development_code: str | None = None
 
 
 class MessageResponse(BaseModel):

@@ -1,26 +1,43 @@
 from __future__ import annotations
 
+import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
 
+import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from lifetracker.core.config import Settings
 from lifetracker.core.errors import AppError
-from lifetracker.features.auth.models import AuthSession
+from lifetracker.features.auth.email import send_password_reset_code
+from lifetracker.features.auth.models import AuthSession, LoginAttempt, PasswordResetChallenge
 from lifetracker.features.auth.repository import AuthRepository
-from lifetracker.features.auth.schemas import LoginRequest, RegisterRequest
+from lifetracker.features.auth.schemas import (
+    ChangePasswordRequest,
+    DeleteAccountRequest,
+    LoginRequest,
+    RegisterRequest,
+    ResetPasswordRequest,
+)
 from lifetracker.features.auth.security import (
     SessionTokens,
     create_access_token,
     hash_optional_metadata,
     hash_password,
+    hash_password_reset_code,
     hash_token,
     new_csrf_token,
+    new_password_reset_code,
     new_refresh_token,
     verify_password,
 )
 from lifetracker.features.users.models import User, UserPreference
+
+logger = structlog.get_logger(__name__)
+
+
+def utc_datetime(value: datetime) -> datetime:
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value
 
 
 class AuthService:
@@ -70,9 +87,23 @@ class AuthService:
         user_agent: str | None,
         ip_address: str | None,
     ) -> tuple[User, SessionTokens]:
-        user = await self.repository.get_user_by_email(request.email.lower().strip())
+        email = request.email.lower().strip()
+        limit_key, attempt = await self._login_limit(email, ip_address)
+        user = await self.repository.get_user_by_email(email)
         valid_password = verify_password(request.password, user.password_hash if user else None)
         if not user or not valid_password or user.status != "active":
+            now = datetime.now(UTC)
+            if attempt is None:
+                attempt = LoginAttempt(
+                    key_hash=limit_key,
+                    failure_count=0,
+                    window_started_at=now,
+                )
+                self.repository.add(attempt)
+            attempt.failure_count += 1
+            if attempt.failure_count >= self.settings.login_max_attempts:
+                attempt.blocked_until = now + timedelta(minutes=self.settings.login_lock_minutes)
+            await self.session.commit()
             raise AppError(
                 status_code=401,
                 code="INVALID_CREDENTIALS",
@@ -80,9 +111,140 @@ class AuthService:
                 detail="The email or password is incorrect.",
             )
 
+        if attempt is not None:
+            await self.repository.delete(attempt)
+
         tokens = await self._create_session(user=user, user_agent=user_agent, ip_address=ip_address)
         await self.session.commit()
         return user, tokens
+
+    async def request_password_reset(
+        self, email_value: str, *, ip_address: str | None
+    ) -> str | None:
+        if self.settings.environment == "production" and not self.settings.smtp_configured:
+            raise AppError(
+                status_code=503,
+                code="PASSWORD_RESET_UNAVAILABLE",
+                title="Password reset is unavailable",
+                detail="Email delivery is not configured. Please try again later.",
+            )
+
+        email = email_value.lower().strip()
+        user = await self.repository.get_user_by_email(email)
+        if not user or user.status != "active":
+            return None
+
+        now = datetime.now(UTC)
+        recent = await self.repository.recent_password_reset_count(email, now - timedelta(hours=1))
+        if recent >= 3:
+            return None
+
+        challenge_id = uuid.uuid4()
+        code = new_password_reset_code()
+        challenge = PasswordResetChallenge(
+            id=challenge_id,
+            user_id=user.id,
+            email=email,
+            code_hash=hash_password_reset_code(code, challenge_id, self.settings.jwt_secret),
+            expires_at=now + timedelta(minutes=self.settings.password_reset_minutes),
+            attempts=0,
+            requester_hash=hash_optional_metadata(ip_address),
+        )
+        self.repository.add(challenge)
+
+        if self.settings.environment == "production":
+            try:
+                await send_password_reset_code(self.settings, email, code)
+            except Exception as exc:
+                await self.session.rollback()
+                logger.exception("password_reset_email_failed", exception_type=type(exc).__name__)
+                raise AppError(
+                    status_code=503,
+                    code="PASSWORD_RESET_UNAVAILABLE",
+                    title="Password reset is unavailable",
+                    detail="The verification email could not be sent. Please try again later.",
+                ) from exc
+
+        await self.session.commit()
+        return code if self.settings.environment != "production" else None
+
+    async def reset_password(self, request: ResetPasswordRequest) -> None:
+        email = request.email.lower().strip()
+        now = datetime.now(UTC)
+        challenge = await self.repository.get_active_password_reset(email, now)
+        if challenge is None or challenge.attempts >= self.settings.password_reset_max_attempts:
+            raise self._invalid_reset_error()
+
+        expected = hash_password_reset_code(request.code, challenge.id, self.settings.jwt_secret)
+        if not secrets.compare_digest(expected, challenge.code_hash):
+            challenge.attempts += 1
+            if challenge.attempts >= self.settings.password_reset_max_attempts:
+                challenge.consumed_at = now
+            await self.session.commit()
+            raise self._invalid_reset_error()
+
+        user = await self.repository.get_user_by_id(challenge.user_id)
+        if not user or user.status != "active":
+            challenge.consumed_at = now
+            await self.session.commit()
+            raise self._invalid_reset_error()
+        if verify_password(request.new_password, user.password_hash):
+            raise AppError(
+                status_code=422,
+                code="PASSWORD_REUSED",
+                title="Choose a different password",
+                detail="Your new password must be different from your current password.",
+            )
+
+        user.password_hash = hash_password(request.new_password)
+        await self.repository.consume_password_resets(user.id)
+        await self.repository.revoke_all_sessions(user.id, "password_reset")
+        await self.session.commit()
+
+    async def change_password(self, user: User, request: ChangePasswordRequest) -> None:
+        if not verify_password(request.current_password, user.password_hash):
+            raise AppError(
+                status_code=400,
+                code="CURRENT_PASSWORD_INVALID",
+                title="Password was not changed",
+                detail="The current password is incorrect.",
+            )
+        user.password_hash = hash_password(request.new_password)
+        await self.repository.revoke_all_sessions(user.id, "password_changed")
+        await self.session.commit()
+
+    async def delete_account(self, user: User, request: DeleteAccountRequest) -> None:
+        if not verify_password(request.password, user.password_hash):
+            raise AppError(
+                status_code=400,
+                code="CURRENT_PASSWORD_INVALID",
+                title="Account was not deleted",
+                detail="The password is incorrect.",
+            )
+        await self.repository.delete(user)
+        await self.session.commit()
+
+    async def _login_limit(
+        self, email: str, ip_address: str | None
+    ) -> tuple[str, LoginAttempt | None]:
+        key = hash_token(f"{email}|{ip_address or 'unknown'}")
+        attempt = await self.repository.get_login_attempt_for_update(key)
+        if attempt is None:
+            return key, None
+        now = datetime.now(UTC)
+        if attempt.blocked_until and utc_datetime(attempt.blocked_until) > now:
+            raise AppError(
+                status_code=429,
+                code="LOGIN_RATE_LIMITED",
+                title="Too many sign-in attempts",
+                detail="Wait a few minutes before trying again.",
+            )
+        window_started = utc_datetime(attempt.window_started_at)
+        if window_started <= now - timedelta(minutes=self.settings.login_lock_minutes):
+            attempt.failure_count = 0
+            attempt.window_started_at = now
+            attempt.blocked_until = None
+        return key, attempt
 
     async def refresh(self, refresh_token: str | None) -> tuple[User, SessionTokens]:
         if not refresh_token:
@@ -164,4 +326,13 @@ class AuthService:
             code="INVALID_SESSION",
             title="Authentication required",
             detail="Your session is invalid or has expired.",
+        )
+
+    @staticmethod
+    def _invalid_reset_error() -> AppError:
+        return AppError(
+            status_code=400,
+            code="RESET_CODE_INVALID",
+            title="Password could not be reset",
+            detail="The verification code is invalid or has expired.",
         )

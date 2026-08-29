@@ -31,7 +31,7 @@ if (!existsSync(apiEnvironmentPath)) {
 if (!existsSync(webEnvironmentPath)) {
   writeFileSync(
     webEnvironmentPath,
-    "NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1\n",
+    "NEXT_PUBLIC_API_URL=http://localhost:8010/api/v1\n",
     { encoding: "utf8", mode: 0o600 },
   );
   console.log("Created apps/web/.env.local.");

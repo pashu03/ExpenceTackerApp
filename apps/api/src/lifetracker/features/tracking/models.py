@@ -5,6 +5,7 @@ from datetime import date
 from decimal import Decimal
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Date,
     ForeignKey,
@@ -81,6 +82,9 @@ class FinancialGoal(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     description: Mapped[str | None] = mapped_column(String(300), nullable=True)
     target_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     current_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    monthly_contribution: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=0
+    )
     target_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
 
@@ -88,7 +92,47 @@ class FinancialGoal(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         CheckConstraint("target_amount > 0", name="ck_goals_positive_target"),
         CheckConstraint("current_amount >= 0", name="ck_goals_nonnegative_current"),
         CheckConstraint(
-            "status IN ('active', 'completed', 'paused')", name="ck_goals_status"
+            "monthly_contribution >= 0", name="ck_goals_nonnegative_monthly_contribution"
         ),
+        CheckConstraint("status IN ('active', 'completed', 'paused')", name="ck_goals_status"),
         Index("ix_goals_user_status", "user_id", "status"),
+    )
+
+
+class Budget(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "budgets"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    month: Mapped[str] = mapped_column(String(7), nullable=False)
+    category: Mapped[str] = mapped_column(String(60), nullable=False)
+    limit_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    notes: Mapped[str | None] = mapped_column(String(300), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint("limit_amount > 0", name="ck_budgets_positive_limit"),
+        UniqueConstraint("user_id", "month", "category", name="uq_budget_user_month_category"),
+        Index("ix_budgets_user_month", "user_id", "month"),
+    )
+
+
+class Reminder(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "reminders"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    title: Mapped[str] = mapped_column(String(120), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    due_on: Mapped[date] = mapped_column(Date, nullable=False)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False, default="general")
+    completed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ('general', 'expense', 'goal', 'journal', 'income')",
+            name="ck_reminders_kind",
+        ),
+        Index("ix_reminders_user_due", "user_id", "due_on", "completed"),
     )

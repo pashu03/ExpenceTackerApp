@@ -1,6 +1,7 @@
-import { FeatureFoundation } from "@/components/layout/feature-foundation";
+import type { Metadata } from "next";
+import { InsightsScreen } from "@/features/tracking/insights-screen";
 
+export const metadata: Metadata = { title: "Insights | LifeTracker" };
 export default function InsightsPage() {
-  return <FeatureFoundation title="AI Insights" description="Optional guidance grounded in calculations you can verify." nextStep="AI remains disabled until consent, deterministic analytics, and evidence validation are implemented." />;
+  return <InsightsScreen />;
 }
-

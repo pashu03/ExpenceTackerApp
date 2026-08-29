@@ -9,10 +9,14 @@ from lifetracker.features.auth.dependencies import (
 )
 from lifetracker.features.auth.schemas import (
     AuthResponse,
+    ChangePasswordRequest,
+    DeleteAccountRequest,
+    ForgotPasswordRequest,
     LoginRequest,
     MessageData,
     MessageResponse,
     RegisterRequest,
+    ResetPasswordRequest,
 )
 from lifetracker.features.auth.security import SessionTokens
 from lifetracker.features.auth.service import AuthService
@@ -97,6 +101,36 @@ async def login(
     return AuthResponse(data=UserRead.model_validate(user))
 
 
+@router.post("/forgot-password", response_model=MessageResponse)
+async def forgot_password(
+    payload: ForgotPasswordRequest,
+    request: Request,
+    session: SessionDependency,
+    settings: SettingsDependency,
+) -> MessageResponse:
+    development_code = await AuthService(session, settings).request_password_reset(
+        str(payload.email), ip_address=_request_ip(request)
+    )
+    return MessageResponse(
+        data=MessageData(
+            message=("If an account exists for that email, a verification code has been sent."),
+            development_code=development_code,
+        )
+    )
+
+
+@router.post("/reset-password", response_model=MessageResponse)
+async def reset_password(
+    payload: ResetPasswordRequest,
+    session: SessionDependency,
+    settings: SettingsDependency,
+) -> MessageResponse:
+    await AuthService(session, settings).reset_password(payload)
+    return MessageResponse(
+        data=MessageData(message="Your password has been reset. You can now sign in.")
+    )
+
+
 @router.post("/refresh", response_model=AuthResponse)
 async def refresh(
     request: Request,
@@ -121,6 +155,34 @@ async def logout(
     await AuthService(session, settings).logout(request.cookies.get(settings.refresh_cookie_name))
     _clear_auth_cookies(response, settings)
     return MessageResponse(data=MessageData(message="Signed out successfully."))
+
+
+@router.post("/change-password", response_model=MessageResponse)
+async def change_password(
+    payload: ChangePasswordRequest,
+    response: Response,
+    session: SessionDependency,
+    settings: SettingsDependency,
+    current_user: CurrentUser,
+) -> MessageResponse:
+    await AuthService(session, settings).change_password(current_user, payload)
+    _clear_auth_cookies(response, settings)
+    return MessageResponse(
+        data=MessageData(message="Password changed. Sign in again on this device.")
+    )
+
+
+@router.post("/delete-account", response_model=MessageResponse)
+async def delete_account(
+    payload: DeleteAccountRequest,
+    response: Response,
+    session: SessionDependency,
+    settings: SettingsDependency,
+    current_user: CurrentUser,
+) -> MessageResponse:
+    await AuthService(session, settings).delete_account(current_user, payload)
+    _clear_auth_cookies(response, settings)
+    return MessageResponse(data=MessageData(message="Your account and data were deleted."))
 
 
 @router.get("/me", response_model=UserResponse)

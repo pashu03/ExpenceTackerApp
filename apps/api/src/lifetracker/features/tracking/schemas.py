@@ -75,6 +75,11 @@ class IncomeUpdate(BaseModel):
     description: str | None = Field(default=None, max_length=200)
     received_on: date | None = None
 
+    @field_validator("source")
+    @classmethod
+    def normalize_source(cls, value: str | None) -> str | None:
+        return " ".join(value.split()) if value else value
+
 
 class IncomeRead(IncomeInput):
     model_config = ConfigDict(from_attributes=True)
@@ -105,6 +110,16 @@ class JournalUpdate(BaseModel):
     content: str | None = Field(default=None, min_length=1, max_length=10000)
     mood: str | None = Field(default=None, max_length=30)
 
+    @field_validator("content")
+    @classmethod
+    def content_must_not_be_blank(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        value = value.strip()
+        if not value:
+            raise ValueError("Journal content cannot be blank")
+        return value
+
 
 class JournalRead(JournalInput):
     model_config = ConfigDict(from_attributes=True)
@@ -119,8 +134,19 @@ class GoalInput(BaseModel):
     description: str | None = Field(default=None, max_length=300)
     target_amount: Decimal = Field(gt=0, max_digits=14, decimal_places=2)
     current_amount: Decimal = Field(default=Decimal("0"), ge=0, max_digits=14, decimal_places=2)
+    monthly_contribution: Decimal = Field(
+        default=Decimal("0"), ge=0, max_digits=14, decimal_places=2
+    )
     target_date: date | None = None
     status: str = Field(default="active", pattern="^(active|completed|paused)$")
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str) -> str:
+        value = " ".join(value.split())
+        if not value:
+            raise ValueError("Goal name cannot be blank")
+        return value
 
     @model_validator(mode="after")
     def complete_goal_when_funded(self) -> GoalInput:
@@ -134,8 +160,16 @@ class GoalUpdate(BaseModel):
     description: str | None = Field(default=None, max_length=300)
     target_amount: Decimal | None = Field(default=None, gt=0, max_digits=14, decimal_places=2)
     current_amount: Decimal | None = Field(default=None, ge=0, max_digits=14, decimal_places=2)
+    monthly_contribution: Decimal | None = Field(
+        default=None, ge=0, max_digits=14, decimal_places=2
+    )
     target_date: date | None = None
     status: str | None = Field(default=None, pattern="^(active|completed|paused)$")
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str | None) -> str | None:
+        return " ".join(value.split()) if value else value
 
 
 class GoalRead(GoalInput):
@@ -144,6 +178,78 @@ class GoalRead(GoalInput):
     id: uuid.UUID
     progress_percentage: Decimal = Decimal("0")
     remaining_amount: Decimal = Decimal("0")
+    created_at: datetime
+    updated_at: datetime
+
+
+class BudgetInput(BaseModel):
+    month: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
+    category: str = Field(min_length=1, max_length=60)
+    limit_amount: Decimal = Field(gt=0, max_digits=14, decimal_places=2)
+    notes: str | None = Field(default=None, max_length=300)
+
+    @field_validator("category")
+    @classmethod
+    def normalize_category(cls, value: str) -> str:
+        return " ".join(value.split())
+
+
+class BudgetUpdate(BaseModel):
+    month: str | None = Field(default=None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
+    category: str | None = Field(default=None, min_length=1, max_length=60)
+    limit_amount: Decimal | None = Field(default=None, gt=0, max_digits=14, decimal_places=2)
+    notes: str | None = Field(default=None, max_length=300)
+
+    @field_validator("category")
+    @classmethod
+    def normalize_category(cls, value: str | None) -> str | None:
+        return " ".join(value.split()) if value else value
+
+
+class BudgetRead(BudgetInput):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    spent_amount: Decimal = Decimal("0")
+    remaining_amount: Decimal = Decimal("0")
+    usage_percentage: Decimal = Decimal("0")
+    created_at: datetime
+    updated_at: datetime
+
+
+class ReminderInput(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
+    description: str | None = Field(default=None, max_length=500)
+    due_on: date
+    kind: str = Field(default="general", pattern="^(general|expense|goal|journal|income)$")
+    completed: bool = False
+
+    @field_validator("title")
+    @classmethod
+    def normalize_title(cls, value: str) -> str:
+        value = " ".join(value.split())
+        if not value:
+            raise ValueError("Reminder title cannot be blank")
+        return value
+
+
+class ReminderUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=120)
+    description: str | None = Field(default=None, max_length=500)
+    due_on: date | None = None
+    kind: str | None = Field(default=None, pattern="^(general|expense|goal|journal|income)$")
+    completed: bool | None = None
+
+    @field_validator("title")
+    @classmethod
+    def normalize_title(cls, value: str | None) -> str | None:
+        return " ".join(value.split()) if value else value
+
+
+class ReminderRead(ReminderInput):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
     created_at: datetime
     updated_at: datetime
 
@@ -166,18 +272,35 @@ class SpendingSuggestion(BaseModel):
     potential_monthly_saving: Decimal | None = None
 
 
+class GoalProjection(BaseModel):
+    goal_id: uuid.UUID
+    name: str
+    remaining_amount: Decimal
+    monthly_contribution: Decimal
+    recommended_monthly_contribution: Decimal
+    estimated_days: int | None
+    estimated_months: int | None
+    income_percentage: Decimal | None
+    affordability_status: str
+    recommendation: str
+
+
 class MonthlySummary(BaseModel):
     month: str
     income: Decimal
     expenses: Decimal
     net_savings: Decimal
     savings_rate: Decimal | None
+    available_after_expenses: Decimal
+    planned_goal_contributions: Decimal
+    recommended_spending_limit: Decimal
     today_expenses: Decimal
     active_goals: int
     categories: list[CategoryTotal]
     daily_spending: list[DailyTotal]
     recent_expenses: list[ExpenseRead]
     suggestions: list[SpendingSuggestion]
+    goal_projections: list[GoalProjection]
 
 
 ExpenseResponse = EntityResponse[ExpenseRead]
@@ -188,4 +311,8 @@ JournalResponse = EntityResponse[JournalRead]
 JournalListResponse = ListResponse[JournalRead]
 GoalResponse = EntityResponse[GoalRead]
 GoalListResponse = ListResponse[GoalRead]
+BudgetResponse = EntityResponse[BudgetRead]
+BudgetListResponse = ListResponse[BudgetRead]
+ReminderResponse = EntityResponse[ReminderRead]
+ReminderListResponse = ListResponse[ReminderRead]
 MonthlySummaryResponse = EntityResponse[MonthlySummary]

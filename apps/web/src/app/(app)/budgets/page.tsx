@@ -1,6 +1,8 @@
-import { FeatureFoundation } from "@/components/layout/feature-foundation";
+import type { Metadata } from "next";
+import { BudgetsScreen } from "@/features/tracking/budgets-screen";
+
+export const metadata: Metadata = { title: "Budgets" };
 
 export default function BudgetsPage() {
-  return <FeatureFoundation title="Budgets" description="Set flexible limits that support you rather than restrict you." nextStep="Budget calculations will be added after income and expense records provide real totals." />;
+  return <BudgetsScreen />;
 }
-

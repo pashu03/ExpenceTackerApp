@@ -1,13 +1,15 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
-import { ArrowUpRight, BookHeart, Goal, HandCoins, Plus, WalletCards } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowUpRight, BellRing, BookHeart, Check, Goal, HandCoins, Plus, WalletCards } from "lucide-react";
 import Link from "next/link";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { useToast } from "@/components/ui/toast-provider";
 import { useAuth } from "@/features/auth/auth-provider";
 import { ErrorState, LoadingState } from "@/components/ui/states";
 import { trackingApi } from "@/features/tracking/api";
-import { currentMonth, formatDate, moneyFormatter } from "@/features/tracking/utils";
+import { currentMonth, dateForTimezone, formatDate, moneyFormatter } from "@/features/tracking/utils";
 
 const quickActions = [
   { href: "/expenses/new", label: "Add expense", icon: Plus },
@@ -18,10 +20,27 @@ const quickActions = [
 
 export function Dashboard() {
   const { user } = useAuth();
+  const { showToast } = useToast();
+  const queryClient = useQueryClient();
   const summaryQuery = useQuery({
     queryKey: ["monthly-summary", currentMonth()],
     queryFn: () => trackingApi.summary(currentMonth()),
     enabled: Boolean(user),
+  });
+  const reminderQuery = useQuery({
+    queryKey: ["reminders", "dashboard"],
+    queryFn: () => trackingApi.reminders(),
+    enabled: Boolean(user?.preferences.notifications_enabled),
+  });
+  const completeReminder = useMutation({
+    mutationFn: (id: string) => trackingApi.saveReminder({ completed: true }, id),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["reminders"] }),
+        queryClient.invalidateQueries({ queryKey: ["calendar"] }),
+      ]);
+      showToast("Reminder completed.");
+    },
   });
   if (!user) return null;
   if (summaryQuery.isLoading) return <LoadingState label="Loading your dashboard..." />;
@@ -31,6 +50,16 @@ export function Dashboard() {
   if (!summary) return null;
   const money = moneyFormatter(user);
   const firstName = user.name.split(" ")[0];
+  const today = dateForTimezone(user.preferences.timezone);
+  const dueReminders = (reminderQuery.data ?? []).filter(
+    (item) => !item.completed && item.due_on <= today,
+  );
+  const onboarding = [
+    { done: Number(summary.income) > 0, label: "Add your first income", href: "/income?create=true" },
+    { done: Number(summary.expenses) > 0, label: "Record your first expense", href: "/expenses/new" },
+    { done: summary.active_goals > 0, label: "Create a financial goal", href: "/goals?create=true" },
+  ];
+  const onboardingComplete = onboarding.every((item) => item.done);
   const stats = [
     { label: "Monthly income", value: money.format(Number(summary.income)), icon: HandCoins, tone: "text-[var(--success)]" },
     { label: "Monthly expenses", value: money.format(Number(summary.expenses)), icon: WalletCards, tone: "text-[var(--warning)]" },
@@ -48,6 +77,20 @@ export function Dashboard() {
           adding small entries to build a clear monthly picture.
         </p>
       </header>
+
+      {!onboardingComplete ? (
+        <Card className="border-[var(--brand)]/25 bg-[var(--brand-soft)]">
+          <CardHeader><h2 className="font-semibold">Finish setting up your workspace</h2><p className="mt-1 text-sm text-[var(--text-muted)]">Complete these basics to unlock a useful monthly picture.</p></CardHeader>
+          <CardContent className="grid gap-2 sm:grid-cols-3">{onboarding.map((item) => <Link key={item.href} href={item.href} className="flex items-center gap-3 rounded-xl bg-[var(--surface)] px-4 py-3 text-sm font-medium"><span className={`grid size-7 place-items-center rounded-full ${item.done ? "bg-[var(--brand)] text-white" : "border border-[var(--border)] text-[var(--text-muted)]"}`}>{item.done ? <Check size={15} /> : <Plus size={15} />}</span><span className={item.done ? "text-[var(--text-muted)] line-through" : ""}>{item.label}</span></Link>)}</CardContent>
+        </Card>
+      ) : null}
+
+      {user.preferences.notifications_enabled && dueReminders.length ? (
+        <Card className="border-[color-mix(in_srgb,var(--warning)_35%,var(--border))]">
+          <CardHeader className="flex-row items-center justify-between gap-4"><div><h2 className="flex items-center gap-2 font-semibold"><BellRing size={18} className="text-[var(--warning)]" /> Due reminders</h2><p className="mt-1 text-sm text-[var(--text-muted)]">{dueReminders.length} item{dueReminders.length === 1 ? " needs" : "s need"} your attention.</p></div><Link href="/calendar" className="text-sm font-semibold text-[var(--brand)]">Open calendar</Link></CardHeader>
+          <CardContent className="grid gap-2">{dueReminders.slice(0, 4).map((item) => <div key={item.id} className="flex items-center gap-3 rounded-xl bg-[var(--surface-subtle)] px-4 py-3"><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{item.title}</p><p className="mt-0.5 text-xs text-[var(--text-muted)]">Due {formatDate(item.due_on)}</p></div><Button variant="ghost" className="shrink-0" disabled={completeReminder.isPending} onClick={() => completeReminder.mutate(item.id)}><Check size={16} /> Done</Button></div>)}</CardContent>
+        </Card>
+      ) : null}
 
       <section aria-labelledby="summary-heading">
         <div className="mb-3 flex items-center justify-between">
@@ -73,6 +116,13 @@ export function Dashboard() {
           })}
         </div>
       </section>
+
+      {summary.goal_projections.length ? (
+        <Card>
+          <CardHeader className="flex-row items-start justify-between gap-4"><div><h2 className="font-semibold">Goal saving plan</h2><p className="mt-1 text-sm text-[var(--text-muted)]">Live plan based on this month&apos;s recorded income and expenses.</p></div><Link href="/goals" className="shrink-0 text-sm font-semibold text-[var(--brand)]">Manage goals</Link></CardHeader>
+          <CardContent className="grid gap-4 sm:grid-cols-3"><div className="rounded-xl bg-[var(--surface-subtle)] p-4"><p className="text-xs text-[var(--text-muted)]">Available after expenses</p><p className="mt-2 text-xl font-semibold">{money.format(Number(summary.available_after_expenses))}</p></div><div className="rounded-xl bg-[var(--surface-subtle)] p-4"><p className="text-xs text-[var(--text-muted)]">Planned for goals</p><p className="mt-2 text-xl font-semibold text-[var(--brand)]">{money.format(Number(summary.planned_goal_contributions))}</p></div><div className="rounded-xl bg-[var(--surface-subtle)] p-4"><p className="text-xs text-[var(--text-muted)]">Spending limit after goal plan</p><p className="mt-2 text-xl font-semibold">{money.format(Number(summary.recommended_spending_limit))}</p></div></CardContent>
+        </Card>
+      ) : null}
 
       <div className="grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
         <Card>

@@ -60,3 +60,21 @@ async def test_settings_reject_invalid_timezone(client: AsyncClient) -> None:
 
     assert response.status_code == 422
     assert response.json()["code"] == "VALIDATION_ERROR"
+
+
+async def test_account_export_contains_profile_and_records(client: AsyncClient) -> None:
+    await register(client)
+    await client.post(
+        "/api/v1/expenses",
+        headers=csrf_headers(client),
+        json={"amount": "125.00", "category": "Travel", "spent_on": "2026-08-28"},
+    )
+
+    response = await client.get("/api/v1/settings/export")
+
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert data["format_version"] == 1
+    assert data["profile"]["email"] == "aarav@example.com"
+    assert data["expenses"][0]["amount"] == "125.00"
+    assert "password_hash" not in response.text

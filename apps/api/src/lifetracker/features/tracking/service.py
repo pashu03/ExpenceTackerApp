@@ -2,22 +2,34 @@ from __future__ import annotations
 
 import uuid
 from calendar import monthrange
-from datetime import date
-from decimal import ROUND_HALF_UP, Decimal
+from datetime import date, datetime
+from decimal import ROUND_CEILING, ROUND_HALF_UP, Decimal
 from typing import Any, TypeVar
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from lifetracker.core.errors import AppError
-from lifetracker.features.tracking.models import Expense, FinancialGoal, Income, JournalEntry
+from lifetracker.features.tracking.models import (
+    Budget,
+    Expense,
+    FinancialGoal,
+    Income,
+    JournalEntry,
+    Reminder,
+)
 from lifetracker.features.tracking.schemas import (
+    BudgetInput,
+    BudgetRead,
+    BudgetUpdate,
     CategoryTotal,
     DailyTotal,
     ExpenseInput,
     ExpenseRead,
     ExpenseUpdate,
     GoalInput,
+    GoalProjection,
     GoalRead,
     GoalUpdate,
     IncomeInput,
@@ -25,10 +37,12 @@ from lifetracker.features.tracking.schemas import (
     JournalInput,
     JournalUpdate,
     MonthlySummary,
+    ReminderInput,
+    ReminderUpdate,
     SpendingSuggestion,
 )
 
-ModelT = TypeVar("ModelT", Expense, Income, JournalEntry, FinancialGoal)
+ModelT = TypeVar("ModelT", Expense, Income, JournalEntry, FinancialGoal, Budget, Reminder)
 
 
 def month_bounds(month: str | None) -> tuple[str, date, date]:
@@ -46,9 +60,10 @@ def month_bounds(month: str | None) -> tuple[str, date, date]:
 
 
 class TrackingService:
-    def __init__(self, session: AsyncSession, user_id: uuid.UUID) -> None:
+    def __init__(self, session: AsyncSession, user_id: uuid.UUID, timezone: str = "UTC") -> None:
         self.session = session
         self.user_id = user_id
+        self.timezone = timezone
 
     async def _owned(self, model: type[ModelT], entity_id: uuid.UUID) -> ModelT:
         result = await self.session.execute(
@@ -177,6 +192,69 @@ class TrackingService:
             )
         return await self._update(entity, values)
 
+    async def list_budgets(self, month: str | None) -> list[BudgetRead]:
+        month_name, _, _ = month_bounds(month)
+        budgets = await self._list(
+            select(Budget)
+            .where(Budget.user_id == self.user_id, Budget.month == month_name)
+            .order_by(Budget.category.asc())
+        )
+        expenses = await self.list_expenses(month_name)
+        spent: dict[str, Decimal] = {}
+        for expense in expenses:
+            spent[expense.category] = spent.get(expense.category, Decimal("0")) + expense.amount
+        return [self.budget_read(item, spent.get(item.category, Decimal("0"))) for item in budgets]
+
+    async def create_budget(self, payload: BudgetInput) -> BudgetRead:
+        entity = Budget(user_id=self.user_id, **payload.model_dump())
+        self.session.add(entity)
+        await self.session.commit()
+        await self.session.refresh(entity)
+        return self.budget_read(entity, await self._category_spend(entity.month, entity.category))
+
+    async def update_budget(self, entity_id: uuid.UUID, payload: BudgetUpdate) -> BudgetRead:
+        entity = await self._update(
+            await self._owned(Budget, entity_id), payload.model_dump(exclude_unset=True)
+        )
+        return self.budget_read(entity, await self._category_spend(entity.month, entity.category))
+
+    async def _category_spend(self, month: str, category: str) -> Decimal:
+        return sum(
+            (item.amount for item in await self.list_expenses(month) if item.category == category),
+            Decimal("0"),
+        )
+
+    @staticmethod
+    def budget_read(entity: Budget, spent: Decimal) -> BudgetRead:
+        remaining = entity.limit_amount - spent
+        usage = (spent / entity.limit_amount * 100).quantize(Decimal("0.1"))
+        return BudgetRead.model_validate(entity).model_copy(
+            update={
+                "spent_amount": spent,
+                "remaining_amount": remaining,
+                "usage_percentage": usage,
+            }
+        )
+
+    async def list_reminders(self, month: str | None) -> list[Reminder]:
+        query = select(Reminder).where(Reminder.user_id == self.user_id)
+        if month:
+            _, start, end = month_bounds(month)
+            query = query.where(Reminder.due_on >= start, Reminder.due_on <= end)
+        return await self._list(query.order_by(Reminder.completed.asc(), Reminder.due_on.asc()))
+
+    async def create_reminder(self, payload: ReminderInput) -> Reminder:
+        entity = Reminder(user_id=self.user_id, **payload.model_dump())
+        self.session.add(entity)
+        await self.session.commit()
+        await self.session.refresh(entity)
+        return entity
+
+    async def update_reminder(self, entity_id: uuid.UUID, payload: ReminderUpdate) -> Reminder:
+        return await self._update(
+            await self._owned(Reminder, entity_id), payload.model_dump(exclude_unset=True)
+        )
+
     async def delete(self, model: type[ModelT], entity_id: uuid.UUID) -> None:
         await self.session.delete(await self._owned(model, entity_id))
         await self.session.commit()
@@ -232,14 +310,32 @@ class TrackingService:
                 category_amounts.items(), key=lambda item: item[1], reverse=True
             )
         ]
-        suggestions = self._suggestions(total_income, total_expenses, categories)
+        (
+            goal_projections,
+            available_after_expenses,
+            planned_goal_contributions,
+            recommended_spending_limit,
+        ) = self._goal_projections(goals, total_income, total_expenses)
+        suggestions = self._suggestions(
+            total_income,
+            total_expenses,
+            categories,
+            goal_projections,
+            available_after_expenses,
+            planned_goal_contributions,
+        )
         return MonthlySummary(
             month=month_name,
             income=total_income,
             expenses=total_expenses,
             net_savings=net,
             savings_rate=savings_rate,
-            today_expenses=daily_amounts.get(date.today(), Decimal("0")),
+            available_after_expenses=available_after_expenses,
+            planned_goal_contributions=planned_goal_contributions,
+            recommended_spending_limit=recommended_spending_limit,
+            today_expenses=daily_amounts.get(
+                datetime.now(ZoneInfo(self.timezone)).date(), Decimal("0")
+            ),
             active_goals=sum(goal.status == "active" for goal in goals),
             categories=categories,
             daily_spending=[
@@ -247,21 +343,128 @@ class TrackingService:
             ],
             recent_expenses=[ExpenseRead.model_validate(item) for item in expenses[:5]],
             suggestions=suggestions,
+            goal_projections=goal_projections,
         )
 
     @staticmethod
+    def _goal_projections(
+        goals: list[FinancialGoal], income: Decimal, expenses: Decimal
+    ) -> tuple[list[GoalProjection], Decimal, Decimal, Decimal]:
+        active = [
+            goal
+            for goal in goals
+            if goal.status == "active" and goal.current_amount < goal.target_amount
+        ]
+        available = max(income - expenses, Decimal("0"))
+        planned = sum((goal.monthly_contribution for goal in active), Decimal("0"))
+        unconfigured_count = sum(goal.monthly_contribution <= 0 for goal in active)
+        configured_plan = sum(
+            (goal.monthly_contribution for goal in active if goal.monthly_contribution > 0),
+            Decimal("0"),
+        )
+        unallocated = max(available - min(configured_plan, available), Decimal("0"))
+        unconfigured_share = (
+            (unallocated / unconfigured_count).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
+            if unconfigured_count
+            else Decimal("0")
+        )
+        spending_limit = max(income - planned, Decimal("0"))
+        projections: list[GoalProjection] = []
+
+        for goal in active:
+            remaining = max(goal.target_amount - goal.current_amount, Decimal("0"))
+            contribution = goal.monthly_contribution
+            if contribution <= 0:
+                recommended = min(unconfigured_share, remaining)
+            elif planned <= available:
+                recommended = min(contribution, remaining)
+            elif planned > 0:
+                recommended = min(
+                    (contribution * available / planned).quantize(
+                        Decimal("0.01"), rounding=ROUND_HALF_UP
+                    ),
+                    remaining,
+                )
+            else:
+                recommended = Decimal("0")
+            estimated_days: int | None = None
+            estimated_months: int | None = None
+            if contribution > 0:
+                months = remaining / contribution
+                estimated_months = int(months.to_integral_value(rounding=ROUND_CEILING))
+                estimated_days = int(
+                    (months * Decimal("30.44")).to_integral_value(rounding=ROUND_CEILING)
+                )
+
+            income_percentage = None
+            if income > 0:
+                income_percentage = (contribution / income * 100).quantize(Decimal("0.1"))
+
+            if income <= 0:
+                status = "needs_income"
+                recommendation = (
+                    "Add this month's income before using the affordability estimate."
+                )
+            elif contribution <= 0:
+                status = "not_configured"
+                recommendation = (
+                    f"Set a monthly contribution. Up to {recommended:.2f} is currently "
+                    f"available for this goal after expenses and other goal plans."
+                    if recommended > 0
+                    else "Set a contribution after income is higher than recorded expenses."
+                )
+            elif planned > available:
+                status = "overcommitted"
+                reduction = max(contribution - recommended, Decimal("0"))
+                recommendation = (
+                    f"Based on current income and expenses, reduce this goal's monthly plan "
+                    f"by about {reduction:.2f}, to {recommended:.2f}."
+                )
+            else:
+                status = "on_track"
+                recommendation = (
+                    f"The planned {contribution:.2f} per month fits within current income "
+                    "after expenses."
+                )
+
+            projections.append(
+                GoalProjection(
+                    goal_id=goal.id,
+                    name=goal.name,
+                    remaining_amount=remaining,
+                    monthly_contribution=contribution,
+                    recommended_monthly_contribution=recommended,
+                    estimated_days=estimated_days,
+                    estimated_months=estimated_months,
+                    income_percentage=income_percentage,
+                    affordability_status=status,
+                    recommendation=recommendation,
+                )
+            )
+
+        return projections, available, planned, spending_limit
+
+    @staticmethod
     def _suggestions(
-        income: Decimal, expenses: Decimal, categories: list[CategoryTotal]
+        income: Decimal,
+        expenses: Decimal,
+        categories: list[CategoryTotal],
+        goal_projections: list[GoalProjection],
+        available: Decimal,
+        planned: Decimal,
     ) -> list[SpendingSuggestion]:
         if expenses == 0:
-            return [
+            result = [
                 SpendingSuggestion(
                     type="info",
                     title="Add a few expenses",
                     description="Record your spending to receive monthly saving suggestions.",
                 )
             ]
-        result: list[SpendingSuggestion] = []
+        else:
+            result = []
         if income == 0:
             result.append(
                 SpendingSuggestion(
@@ -309,7 +512,7 @@ class TrackingService:
                     potential_monthly_saving=reduction,
                 )
             )
-        else:
+        elif categories:
             largest = categories[0]
             result.append(
                 SpendingSuggestion(
@@ -330,6 +533,28 @@ class TrackingService:
                         "Consider moving part of your current surplus toward an active goal."
                     ),
                     potential_monthly_saving=income - expenses,
+                )
+            )
+        if goal_projections and planned == 0:
+            result.append(
+                SpendingSuggestion(
+                    type="info",
+                    title="Plan a monthly goal contribution",
+                    description=(
+                        "Choose how much of your monthly income to reserve for each active goal."
+                    ),
+                )
+            )
+        elif goal_projections and planned > available:
+            result.append(
+                SpendingSuggestion(
+                    type="warning",
+                    title="Goal plan exceeds available cash",
+                    description=(
+                        "Your planned goal contributions are higher than income after this "
+                        "month's recorded expenses."
+                    ),
+                    potential_monthly_saving=planned - available,
                 )
             )
         return result[:3]

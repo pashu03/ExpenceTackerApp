@@ -113,3 +113,105 @@ async def test_unauthenticated_user_cannot_access_protected_endpoint(client: Asy
 
     assert response.status_code == 401
     assert response.json()["code"] == "INVALID_SESSION"
+
+
+async def test_password_reset_uses_one_time_code_and_revokes_sessions(client: AsyncClient) -> None:
+    await register(client)
+
+    requested = await client.post(
+        "/api/v1/auth/forgot-password", json={"email": REGISTER_PAYLOAD["email"]}
+    )
+    assert requested.status_code == 200
+    code = requested.json()["data"]["development_code"]
+    assert len(code) == 6
+
+    reset = await client.post(
+        "/api/v1/auth/reset-password",
+        json={
+            "email": REGISTER_PAYLOAD["email"],
+            "code": code,
+            "new_password": "newsecure456",
+        },
+    )
+    assert reset.status_code == 200, reset.text
+    assert (await client.get("/api/v1/auth/me")).status_code == 401
+
+    reused = await client.post(
+        "/api/v1/auth/reset-password",
+        json={
+            "email": REGISTER_PAYLOAD["email"],
+            "code": code,
+            "new_password": "another789",
+        },
+    )
+    assert reused.status_code == 400
+
+    login = await client.post(
+        "/api/v1/auth/login",
+        json={"email": REGISTER_PAYLOAD["email"], "password": "newsecure456"},
+    )
+    assert login.status_code == 200
+
+
+async def test_forgot_password_does_not_reveal_unknown_email(client: AsyncClient) -> None:
+    response = await client.post(
+        "/api/v1/auth/forgot-password", json={"email": "unknown@example.com"}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["development_code"] is None
+
+
+async def test_login_is_rate_limited_after_repeated_failures(client: AsyncClient) -> None:
+    await register(client)
+    await client.post("/api/v1/auth/logout", headers=csrf_headers(client))
+
+    for _ in range(5):
+        response = await client.post(
+            "/api/v1/auth/login",
+            json={"email": REGISTER_PAYLOAD["email"], "password": "wrong-password"},
+        )
+        assert response.status_code == 401
+
+    blocked = await client.post(
+        "/api/v1/auth/login",
+        json={"email": REGISTER_PAYLOAD["email"], "password": REGISTER_PAYLOAD["password"]},
+    )
+    assert blocked.status_code == 429
+    assert blocked.json()["code"] == "LOGIN_RATE_LIMITED"
+
+
+async def test_change_password_revokes_session(client: AsyncClient) -> None:
+    await register(client)
+
+    changed = await client.post(
+        "/api/v1/auth/change-password",
+        headers=csrf_headers(client),
+        json={
+            "current_password": REGISTER_PAYLOAD["password"],
+            "new_password": "changedpass456",
+        },
+    )
+    assert changed.status_code == 200, changed.text
+    assert (await client.get("/api/v1/auth/me")).status_code == 401
+
+    login = await client.post(
+        "/api/v1/auth/login",
+        json={"email": REGISTER_PAYLOAD["email"], "password": "changedpass456"},
+    )
+    assert login.status_code == 200
+
+
+async def test_delete_account_removes_user_and_allows_fresh_registration(
+    client: AsyncClient,
+) -> None:
+    await register(client)
+
+    deleted = await client.post(
+        "/api/v1/auth/delete-account",
+        headers=csrf_headers(client),
+        json={"password": REGISTER_PAYLOAD["password"], "confirmation": "DELETE"},
+    )
+    assert deleted.status_code == 200, deleted.text
+    assert (await client.get("/api/v1/auth/me")).status_code == 401
+    assert (await client.post("/api/v1/auth/register", json=REGISTER_PAYLOAD)).status_code == 201

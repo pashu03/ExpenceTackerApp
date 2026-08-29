@@ -29,3 +29,10 @@ export interface LoginInput {
 export interface RegisterInput extends LoginInput {
   name: string;
 }
+
+export interface MessageResponse {
+  data: {
+    message: string;
+    development_code?: string | null;
+  };
+}

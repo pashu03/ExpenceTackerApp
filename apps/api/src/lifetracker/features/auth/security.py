@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import secrets
 import uuid
 from dataclasses import dataclass
@@ -49,6 +50,15 @@ def new_refresh_token() -> str:
 
 def new_csrf_token() -> str:
     return secrets.token_urlsafe(32)
+
+
+def new_password_reset_code() -> str:
+    return f"{secrets.randbelow(1_000_000):06d}"
+
+
+def hash_password_reset_code(code: str, challenge_id: uuid.UUID, secret: str) -> str:
+    message = f"{challenge_id}:{code}".encode()
+    return hmac.new(secret.encode(), message, hashlib.sha256).hexdigest()
 
 
 def create_access_token(*, user_id: uuid.UUID, session_id: uuid.UUID, settings: Settings) -> str:

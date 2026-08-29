@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
 import { Textarea } from "@/components/ui/textarea";
+import { useToast } from "@/components/ui/toast-provider";
 import { trackingApi } from "./api";
 import type { JournalEntry, JournalInput } from "./types";
 import { errorMessage, formatDate, localDate } from "./utils";
@@ -19,15 +20,16 @@ const emptyJournal = (): JournalInput => ({ entry_date: localDate(), title: "", 
 
 export function JournalScreen() {
   const queryClient = useQueryClient();
+  const { showToast } = useToast();
   const [open, setOpen] = useState(true);
   const [editing, setEditing] = useState<JournalEntry | null>(null);
   const [form, setForm] = useState<JournalInput>(emptyJournal);
   const query = useQuery({ queryKey: ["journal"], queryFn: trackingApi.journal });
   const save = useMutation({
     mutationFn: ({ input, id }: { input: JournalInput; id?: string }) => trackingApi.saveJournal(input, id),
-    onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["journal"] }); close(); },
+    onSuccess: async (_, variables) => { await Promise.all([queryClient.invalidateQueries({ queryKey: ["journal"] }), queryClient.invalidateQueries({ queryKey: ["calendar"] })]); showToast(variables.id ? "Journal entry updated." : "Journal entry saved."); close(); },
   });
-  const remove = useMutation({ mutationFn: trackingApi.deleteJournal, onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["journal"] }); } });
+  const remove = useMutation({ mutationFn: trackingApi.deleteJournal, onSuccess: async () => { await Promise.all([queryClient.invalidateQueries({ queryKey: ["journal"] }), queryClient.invalidateQueries({ queryKey: ["calendar"] })]); showToast("Journal entry deleted."); }, onError: (error) => showToast(errorMessage(error), "error") });
 
   function close() { setEditing(null); setForm(emptyJournal()); setOpen(false); save.reset(); }
   function edit(item: JournalEntry) { setEditing(item); setForm({ entry_date: item.entry_date, title: item.title ?? "", content: item.content, mood: item.mood ?? "Okay" }); setOpen(true); window.scrollTo({ top: 0, behavior: "smooth" }); }

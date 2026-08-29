@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -32,6 +33,10 @@ class UserRead(BaseModel):
 
 class UserResponse(BaseModel):
     data: UserRead
+
+
+class AccountExportResponse(BaseModel):
+    data: dict[str, Any]
 
 
 class SettingsUpdateRequest(BaseModel):

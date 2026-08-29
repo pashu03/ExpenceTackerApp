@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
 import { Textarea } from "@/components/ui/textarea";
+import { useToast } from "@/components/ui/toast-provider";
 import { PageHeader } from "@/components/layout/page-header";
 import { useAuth } from "@/features/auth/auth-provider";
 import { trackingApi } from "./api";
@@ -32,6 +33,7 @@ const emptyExpense = (): ExpenseInput => ({
 
 export function ExpensesScreen({ startOpen = false }: { startOpen?: boolean }) {
   const queryClient = useQueryClient();
+  const { showToast } = useToast();
   const { user } = useAuth();
   const money = moneyFormatter(user);
   const [month, setMonth] = useState(currentMonth());
@@ -45,11 +47,15 @@ export function ExpensesScreen({ startOpen = false }: { startOpen?: boolean }) {
   const save = useMutation({
     mutationFn: ({ input, id }: { input: ExpenseInput; id?: string }) =>
       trackingApi.saveExpense(input, id),
-    onSuccess: async () => {
+    onSuccess: async (_, variables) => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["expenses"] }),
         queryClient.invalidateQueries({ queryKey: ["monthly-summary"] }),
+        queryClient.invalidateQueries({ queryKey: ["budgets"] }),
+        queryClient.invalidateQueries({ queryKey: ["calendar"] }),
+        queryClient.invalidateQueries({ queryKey: ["insights"] }),
       ]);
+      showToast(variables.id ? "Expense updated." : "Expense added.");
       closeForm();
     },
   });
@@ -59,8 +65,13 @@ export function ExpensesScreen({ startOpen = false }: { startOpen?: boolean }) {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["expenses"] }),
         queryClient.invalidateQueries({ queryKey: ["monthly-summary"] }),
+        queryClient.invalidateQueries({ queryKey: ["budgets"] }),
+        queryClient.invalidateQueries({ queryKey: ["calendar"] }),
+        queryClient.invalidateQueries({ queryKey: ["insights"] }),
       ]);
+      showToast("Expense deleted.");
     },
+    onError: (error) => showToast(errorMessage(error), "error"),
   });
 
   function closeForm() {

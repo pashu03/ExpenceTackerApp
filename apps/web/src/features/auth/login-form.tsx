@@ -2,6 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ArrowRight, LoaderCircle } from "lucide-react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -22,6 +23,11 @@ export function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const returnTo = searchParams.get("returnTo");
+  const notice = searchParams.get("passwordChanged")
+    ? "Your password was changed. Sign in with your new password."
+    : searchParams.get("accountDeleted")
+      ? "Your account and all of its data were deleted."
+      : null;
   const safeReturnTo = returnTo?.startsWith("/") && !returnTo.startsWith("//") ? returnTo : "/dashboard";
   const {
     register,
@@ -43,6 +49,11 @@ export function LoginForm() {
 
   return (
     <form className="grid gap-4" onSubmit={submit} noValidate>
+      {notice ? (
+        <div role="status" className="rounded-xl bg-[var(--brand-soft)] px-3.5 py-3 text-sm text-[var(--brand)]">
+          {notice}
+        </div>
+      ) : null}
       {errors.root ? (
         <div role="alert" className="rounded-xl bg-red-500/10 px-3.5 py-3 text-sm text-[var(--danger)]">
           {errors.root.message}
@@ -65,6 +76,14 @@ export function LoginForm() {
         error={errors.password?.message}
         {...register("password")}
       />
+      <div className="-mt-1 text-right">
+        <Link
+          href="/forgot-password"
+          className="text-sm font-semibold text-[var(--brand)] hover:underline"
+        >
+          Forgot password?
+        </Link>
+      </div>
       <Button type="submit" fullWidth disabled={isSubmitting} className="mt-2">
         {isSubmitting ? <LoaderCircle className="animate-spin" size={18} /> : null}
         Sign in

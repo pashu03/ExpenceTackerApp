@@ -1,6 +1,8 @@
 import { apiClient } from "@/lib/api-client";
 import type {
   DataResponse,
+  Budget,
+  BudgetInput,
   Expense,
   ExpenseInput,
   FinancialGoal,
@@ -10,6 +12,8 @@ import type {
   JournalEntry,
   JournalInput,
   MonthlySummary,
+  Reminder,
+  ReminderInput,
 } from "./types";
 
 export const trackingApi = {
@@ -70,5 +74,30 @@ export const trackingApi = {
     return (
       await apiClient.get<DataResponse<MonthlySummary>>(`/analytics/monthly?month=${month}`)
     ).data;
+  },
+  async budgets(month: string) {
+    return (await apiClient.get<DataResponse<Budget[]>>(`/budgets?month=${month}`)).data;
+  },
+  async saveBudget(input: BudgetInput, id?: string) {
+    const response = id
+      ? await apiClient.patch<DataResponse<Budget>>(`/budgets/${id}`, input)
+      : await apiClient.post<DataResponse<Budget>>("/budgets", input);
+    return response.data;
+  },
+  deleteBudget(id: string) {
+    return apiClient.delete(`/budgets/${id}`);
+  },
+  async reminders(month?: string) {
+    const suffix = month ? `?month=${month}` : "";
+    return (await apiClient.get<DataResponse<Reminder[]>>(`/reminders${suffix}`)).data;
+  },
+  async saveReminder(input: Partial<ReminderInput>, id?: string) {
+    const response = id
+      ? await apiClient.patch<DataResponse<Reminder>>(`/reminders/${id}`, input)
+      : await apiClient.post<DataResponse<Reminder>>("/reminders", input);
+    return response.data;
+  },
+  deleteReminder(id: string) {
+    return apiClient.delete(`/reminders/${id}`);
   },
 };

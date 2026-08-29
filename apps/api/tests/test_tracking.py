@@ -57,12 +57,14 @@ async def test_core_records_are_created_updated_listed_and_deleted(client: Async
             "name": "Laptop",
             "target_amount": "100000",
             "current_amount": "25000",
+            "monthly_contribution": "5000",
             "target_date": "2027-12-31",
         },
     )
     assert goal_response.status_code == 201, goal_response.text
     goal_id = goal_response.json()["data"]["id"]
     assert goal_response.json()["data"]["progress_percentage"] == "25.0"
+    assert goal_response.json()["data"]["monthly_contribution"] == "5000.00"
 
     summary = await client.get("/api/v1/dashboard/summary?month=2026-08")
     assert summary.status_code == 200, summary.text
@@ -70,6 +72,13 @@ async def test_core_records_are_created_updated_listed_and_deleted(client: Async
     assert data["income"] == "50000.00"
     assert data["expenses"] == "600.00"
     assert data["net_savings"] == "49400.00"
+    assert data["available_after_expenses"] == "49400.00"
+    assert data["planned_goal_contributions"] == "5000.00"
+    assert data["recommended_spending_limit"] == "45000.00"
+    assert data["goal_projections"][0]["recommended_monthly_contribution"] == "5000.00"
+    assert data["goal_projections"][0]["estimated_months"] == 15
+    assert data["goal_projections"][0]["estimated_days"] == 457
+    assert data["goal_projections"][0]["affordability_status"] == "on_track"
     assert data["categories"][0]["category"] == "Food & Dining"
     assert data["suggestions"]
 
@@ -85,6 +94,86 @@ async def test_core_records_are_created_updated_listed_and_deleted(client: Async
     assert (
         await client.delete(f"/api/v1/goals/{goal_id}", headers=headers)
     ).status_code == 200
+
+
+async def test_goal_plan_reacts_to_income_expenses_and_contribution(client: AsyncClient) -> None:
+    await register(client)
+    headers = csrf_headers(client)
+    assert (
+        await client.post(
+            "/api/v1/income",
+            headers=headers,
+            json={"amount": "10000", "source": "Salary", "received_on": "2026-08-01"},
+        )
+    ).status_code == 201
+    assert (
+        await client.post(
+            "/api/v1/expenses",
+            headers=headers,
+            json={"amount": "7000", "category": "Rent", "spent_on": "2026-08-02"},
+        )
+    ).status_code == 201
+    goal = await client.post(
+        "/api/v1/goals",
+        headers=headers,
+        json={
+            "name": "Emergency fund",
+            "target_amount": "12000",
+            "monthly_contribution": "4000",
+        },
+    )
+    assert goal.status_code == 201, goal.text
+
+    summary = await client.get("/api/v1/analytics/monthly?month=2026-08")
+
+    assert summary.status_code == 200, summary.text
+    data = summary.json()["data"]
+    assert data["available_after_expenses"] == "3000.00"
+    assert data["planned_goal_contributions"] == "4000.00"
+    assert data["recommended_spending_limit"] == "6000.00"
+    projection = data["goal_projections"][0]
+    assert projection["recommended_monthly_contribution"] == "3000.00"
+    assert projection["estimated_months"] == 3
+    assert projection["estimated_days"] == 92
+    assert projection["income_percentage"] == "40.0"
+    assert projection["affordability_status"] == "overcommitted"
+
+
+async def test_goal_recommendations_share_available_cash_proportionally(
+    client: AsyncClient,
+) -> None:
+    await register(client)
+    headers = csrf_headers(client)
+    await client.post(
+        "/api/v1/income",
+        headers=headers,
+        json={"amount": "10000", "source": "Salary", "received_on": "2026-08-01"},
+    )
+    await client.post(
+        "/api/v1/expenses",
+        headers=headers,
+        json={"amount": "4000", "category": "Rent", "spent_on": "2026-08-02"},
+    )
+    for name, contribution in (("Laptop", "6000"), ("Emergency fund", "3000")):
+        response = await client.post(
+            "/api/v1/goals",
+            headers=headers,
+            json={
+                "name": name,
+                "target_amount": "50000",
+                "monthly_contribution": contribution,
+            },
+        )
+        assert response.status_code == 201, response.text
+
+    summary = await client.get("/api/v1/dashboard/summary?month=2026-08")
+    projections = {
+        item["name"]: item for item in summary.json()["data"]["goal_projections"]
+    }
+
+    assert projections["Laptop"]["recommended_monthly_contribution"] == "4000.00"
+    assert projections["Emergency fund"]["recommended_monthly_contribution"] == "2000.00"
+    assert all(item["affordability_status"] == "overcommitted" for item in projections.values())
 
 
 async def test_journal_allows_only_one_entry_per_day(client: AsyncClient) -> None:
@@ -124,3 +213,66 @@ async def test_other_user_cannot_modify_an_owned_expense(client: AsyncClient) ->
 
     assert denied.status_code == 404
     assert denied.json()["code"] == "RESOURCE_NOT_FOUND"
+
+
+async def test_budgets_include_actual_spending_and_support_crud(client: AsyncClient) -> None:
+    await register(client)
+    headers = csrf_headers(client)
+    await client.post(
+        "/api/v1/expenses",
+        headers=headers,
+        json={
+            "amount": "250.00",
+            "category": "Food & Dining",
+            "spent_on": "2026-08-25",
+        },
+    )
+    created = await client.post(
+        "/api/v1/budgets",
+        headers=headers,
+        json={
+            "month": "2026-08",
+            "category": "Food & Dining",
+            "limit_amount": "1000.00",
+        },
+    )
+    assert created.status_code == 201, created.text
+    budget_id = created.json()["data"]["id"]
+    assert created.json()["data"]["spent_amount"] == "250.00"
+    assert created.json()["data"]["usage_percentage"] == "25.0"
+
+    listed = await client.get("/api/v1/budgets?month=2026-08")
+    assert listed.json()["data"][0]["remaining_amount"] == "750.00"
+
+    updated = await client.patch(
+        f"/api/v1/budgets/{budget_id}",
+        headers=headers,
+        json={"limit_amount": "500.00"},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["data"]["usage_percentage"] == "50.0"
+    assert (await client.delete(f"/api/v1/budgets/{budget_id}", headers=headers)).status_code == 200
+
+
+async def test_reminders_support_create_complete_and_delete(client: AsyncClient) -> None:
+    await register(client)
+    headers = csrf_headers(client)
+    created = await client.post(
+        "/api/v1/reminders",
+        headers=headers,
+        json={"title": "Pay electricity bill", "due_on": "2026-08-28", "kind": "expense"},
+    )
+    assert created.status_code == 201, created.text
+    reminder_id = created.json()["data"]["id"]
+
+    listed = await client.get("/api/v1/reminders?month=2026-08")
+    assert listed.json()["data"][0]["title"] == "Pay electricity bill"
+
+    completed = await client.patch(
+        f"/api/v1/reminders/{reminder_id}", headers=headers, json={"completed": True}
+    )
+    assert completed.status_code == 200
+    assert completed.json()["data"]["completed"] is True
+    assert (
+        await client.delete(f"/api/v1/reminders/{reminder_id}", headers=headers)
+    ).status_code == 200
