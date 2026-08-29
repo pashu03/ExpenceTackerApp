@@ -1,8 +1,9 @@
 -- Upgrade an existing LifeTracker Supabase schema from 20260825_0002 to 20260828_0003.
--- Run once in Supabase > SQL Editor. Do not run if Alembic already applied revision 0003.
+-- Run in Supabase > SQL Editor. The CREATE statements are idempotent so this can
+-- safely repair a deployment where the revision was only partially applied.
 BEGIN;
 
-CREATE TABLE password_reset_challenges (
+CREATE TABLE IF NOT EXISTS password_reset_challenges (
     user_id UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
     email VARCHAR(320) NOT NULL,
     code_hash VARCHAR(64) NOT NULL,
@@ -14,9 +15,10 @@ CREATE TABLE password_reset_challenges (
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
-CREATE INDEX ix_password_reset_email_active ON password_reset_challenges (email, consumed_at, expires_at);
+CREATE INDEX IF NOT EXISTS ix_password_reset_email_active
+ON password_reset_challenges (email, consumed_at, expires_at);
 
-CREATE TABLE login_attempts (
+CREATE TABLE IF NOT EXISTS login_attempts (
     key_hash VARCHAR(64) NOT NULL UNIQUE,
     failure_count INTEGER NOT NULL,
     window_started_at TIMESTAMPTZ NOT NULL,
@@ -26,7 +28,7 @@ CREATE TABLE login_attempts (
     updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
-CREATE TABLE budgets (
+CREATE TABLE IF NOT EXISTS budgets (
     user_id UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
     month VARCHAR(7) NOT NULL,
     category VARCHAR(60) NOT NULL,
@@ -37,9 +39,9 @@ CREATE TABLE budgets (
     updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
     CONSTRAINT uq_budget_user_month_category UNIQUE (user_id, month, category)
 );
-CREATE INDEX ix_budgets_user_month ON budgets (user_id, month);
+CREATE INDEX IF NOT EXISTS ix_budgets_user_month ON budgets (user_id, month);
 
-CREATE TABLE reminders (
+CREATE TABLE IF NOT EXISTS reminders (
     user_id UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
     title VARCHAR(120) NOT NULL,
     description VARCHAR(500),
@@ -50,7 +52,8 @@ CREATE TABLE reminders (
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
-CREATE INDEX ix_reminders_user_due ON reminders (user_id, due_on, completed);
+CREATE INDEX IF NOT EXISTS ix_reminders_user_due
+ON reminders (user_id, due_on, completed);
 
 ALTER TABLE password_reset_challenges ENABLE ROW LEVEL SECURITY;
 ALTER TABLE login_attempts ENABLE ROW LEVEL SECURITY;

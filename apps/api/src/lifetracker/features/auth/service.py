@@ -5,6 +5,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import structlog
+from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from lifetracker.core.config import Settings
@@ -88,22 +89,25 @@ class AuthService:
         ip_address: str | None,
     ) -> tuple[User, SessionTokens]:
         email = request.email.lower().strip()
-        limit_key, attempt = await self._login_limit(email, ip_address)
+        limit_key, attempt, rate_limit_available = await self._login_limit(email, ip_address)
         user = await self.repository.get_user_by_email(email)
         valid_password = verify_password(request.password, user.password_hash if user else None)
         if not user or not valid_password or user.status != "active":
             now = datetime.now(UTC)
-            if attempt is None:
+            if rate_limit_available and attempt is None:
                 attempt = LoginAttempt(
                     key_hash=limit_key,
                     failure_count=0,
                     window_started_at=now,
                 )
                 self.repository.add(attempt)
-            attempt.failure_count += 1
-            if attempt.failure_count >= self.settings.login_max_attempts:
-                attempt.blocked_until = now + timedelta(minutes=self.settings.login_lock_minutes)
-            await self.session.commit()
+            if rate_limit_available and attempt is not None:
+                attempt.failure_count += 1
+                if attempt.failure_count >= self.settings.login_max_attempts:
+                    attempt.blocked_until = now + timedelta(
+                        minutes=self.settings.login_lock_minutes
+                    )
+                await self.session.commit()
             raise AppError(
                 status_code=401,
                 code="INVALID_CREDENTIALS",
@@ -226,11 +230,21 @@ class AuthService:
 
     async def _login_limit(
         self, email: str, ip_address: str | None
-    ) -> tuple[str, LoginAttempt | None]:
+    ) -> tuple[str, LoginAttempt | None, bool]:
         key = hash_token(f"{email}|{ip_address or 'unknown'}")
-        attempt = await self.repository.get_login_attempt_for_update(key)
+        try:
+            attempt = await self.repository.get_login_attempt_for_update(key)
+        except ProgrammingError as exc:
+            if getattr(exc.orig, "sqlstate", None) != "42P01":
+                raise
+            await self.session.rollback()
+            logger.warning(
+                "login_rate_limit_storage_unavailable",
+                exception_type=type(exc.orig).__name__,
+            )
+            return key, None, False
         if attempt is None:
-            return key, None
+            return key, None, True
         now = datetime.now(UTC)
         if attempt.blocked_until and utc_datetime(attempt.blocked_until) > now:
             raise AppError(
@@ -244,7 +258,7 @@ class AuthService:
             attempt.failure_count = 0
             attempt.window_started_at = now
             attempt.blocked_until = None
-        return key, attempt
+        return key, attempt, True
 
     async def refresh(self, refresh_token: str | None) -> tuple[User, SessionTokens]:
         if not refresh_token:

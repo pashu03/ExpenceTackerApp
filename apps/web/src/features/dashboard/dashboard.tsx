@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowUpRight, BellRing, BookHeart, Check, Goal, HandCoins, Plus, WalletCards } from "lucide-react";
+import { ArrowUpRight, BellRing, BookHeart, Check, Goal, HandCoins, Plus, ShieldCheck, Sparkles, WalletCards } from "lucide-react";
 import Link from "next/link";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ const quickActions = [
   { href: "/income?create=true", label: "Add income", icon: HandCoins },
   { href: "/my-day?date=today", label: "Write today's journal", icon: BookHeart },
   { href: "/goals?create=true", label: "Create goal", icon: Goal },
+  { href: "/coach", label: "Open financial coach", icon: Sparkles },
 ];
 
 export function Dashboard() {
@@ -61,9 +62,10 @@ export function Dashboard() {
   ];
   const onboardingComplete = onboarding.every((item) => item.done);
   const stats = [
-    { label: "Monthly income", value: money.format(Number(summary.income)), icon: HandCoins, tone: "text-[var(--success)]" },
+    { label: "Recorded income", value: money.format(Number(summary.income)), icon: HandCoins, tone: "text-[var(--success)]" },
     { label: "Monthly expenses", value: money.format(Number(summary.expenses)), icon: WalletCards, tone: "text-[var(--warning)]" },
     { label: "Net cash flow", value: money.format(Number(summary.net_savings)), icon: ArrowUpRight, tone: Number(summary.net_savings) >= 0 ? "text-[var(--brand)]" : "text-[var(--danger)]" },
+    { label: "Safe to spend", value: money.format(Number(summary.safe_to_spend)), icon: ShieldCheck, tone: "text-[var(--success)]" },
     { label: "Active goals", value: String(summary.active_goals), icon: Goal, tone: "text-[var(--brand)]" },
   ];
 
@@ -77,6 +79,15 @@ export function Dashboard() {
           adding small entries to build a clear monthly picture.
         </p>
       </header>
+
+      {summary.income_basis === "latest_salary" ? (
+        <Card className="border-[var(--warning)]/30 bg-[var(--surface-subtle)]">
+          <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4 sm:p-5">
+            <div><p className="font-semibold">Planning with {money.format(Number(summary.planning_income))} latest salary</p><p className="mt-1 text-sm text-[var(--text-muted)]">The selected month has {money.format(Number(summary.income))} recorded income. Coaching calculations use your latest salary baseline and keep the recorded total separate.</p></div>
+            <Link href="/income" className="text-sm font-semibold text-[var(--brand)]">Review income</Link>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {!onboardingComplete ? (
         <Card className="border-[var(--brand)]/25 bg-[var(--brand-soft)]">
@@ -97,7 +108,7 @@ export function Dashboard() {
           <h2 id="summary-heading" className="font-semibold">This month</h2>
           <span className="text-xs text-[var(--text-muted)]">Recorded amounts</span>
         </div>
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           {stats.map((stat) => {
             const Icon = stat.icon;
             return (

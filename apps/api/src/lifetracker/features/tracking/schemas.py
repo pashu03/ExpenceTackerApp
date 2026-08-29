@@ -272,6 +272,40 @@ class SpendingSuggestion(BaseModel):
     potential_monthly_saving: Decimal | None = None
 
 
+class SalaryAllocation(BaseModel):
+    essential_expenses: Decimal
+    goal_savings: Decimal
+    emergency_fund: Decimal
+    flexible_spending: Decimal
+    total_allocated: Decimal
+    unallocated: Decimal
+
+
+class SpendingAlert(BaseModel):
+    severity: str
+    title: str
+    description: str
+    category: str | None = None
+
+
+class SpendingForecast(BaseModel):
+    projected_monthly_spending: Decimal
+    historical_monthly_average: Decimal
+    variance_percentage: Decimal | None
+    months_analyzed: int
+    alerts: list[SpendingAlert]
+
+
+class FinancialHealth(BaseModel):
+    score: int = Field(ge=0, le=100)
+    label: str
+    cash_flow: int = Field(ge=0, le=30)
+    spending_control: int = Field(ge=0, le=25)
+    emergency_readiness: int = Field(ge=0, le=20)
+    goal_planning: int = Field(ge=0, le=15)
+    tracking_consistency: int = Field(ge=0, le=10)
+
+
 class GoalProjection(BaseModel):
     goal_id: uuid.UUID
     name: str
@@ -283,17 +317,27 @@ class GoalProjection(BaseModel):
     income_percentage: Decimal | None
     affordability_status: str
     recommendation: str
+    priority_rank: int
+    priority_reason: str
 
 
 class MonthlySummary(BaseModel):
     month: str
     income: Decimal
+    planning_income: Decimal
+    income_basis: str
+    latest_salary_amount: Decimal | None
+    latest_salary_date: date | None
     expenses: Decimal
     net_savings: Decimal
     savings_rate: Decimal | None
     available_after_expenses: Decimal
     planned_goal_contributions: Decimal
     recommended_spending_limit: Decimal
+    safe_to_spend: Decimal
+    salary_allocation: SalaryAllocation
+    spending_forecast: SpendingForecast
+    financial_health: FinancialHealth
     today_expenses: Decimal
     active_goals: int
     categories: list[CategoryTotal]

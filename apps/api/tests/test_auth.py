@@ -1,6 +1,13 @@
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
+import pytest
 from httpx import AsyncClient
+from sqlalchemy.exc import ProgrammingError
+
+from lifetracker.core.config import Settings
+from lifetracker.features.auth.service import AuthService
 
 REGISTER_PAYLOAD = {
     "name": "Aarav Sharma",
@@ -179,6 +186,49 @@ async def test_login_is_rate_limited_after_repeated_failures(client: AsyncClient
     )
     assert blocked.status_code == 429
     assert blocked.json()["code"] == "LOGIN_RATE_LIMITED"
+
+
+async def test_missing_login_attempt_table_disables_rate_limit_without_crashing() -> None:
+    class MissingTableError(Exception):
+        sqlstate = "42P01"
+
+    session = AsyncMock()
+    settings = Settings(
+        environment="test",
+        database_url="sqlite+aiosqlite://",
+        jwt_secret="test-secret-that-is-longer-than-thirty-two-characters",
+    )
+    service = AuthService(session, settings)
+    service.repository.get_login_attempt_for_update = AsyncMock(
+        side_effect=ProgrammingError("SELECT", {}, MissingTableError("missing table"))
+    )
+
+    _, attempt, available = await service._login_limit("person@example.com", "127.0.0.1")
+
+    assert attempt is None
+    assert available is False
+    session.rollback.assert_awaited_once()
+
+
+async def test_login_rate_limit_does_not_hide_other_database_errors() -> None:
+    class PermissionDeniedError(Exception):
+        sqlstate = "42501"
+
+    session = AsyncMock()
+    settings = Settings(
+        environment="test",
+        database_url="sqlite+aiosqlite://",
+        jwt_secret="test-secret-that-is-longer-than-thirty-two-characters",
+    )
+    service = AuthService(session, settings)
+    error = ProgrammingError("SELECT", {}, PermissionDeniedError("permission denied"))
+    service.repository.get_login_attempt_for_update = AsyncMock(side_effect=error)
+
+    with pytest.raises(ProgrammingError) as raised:
+        await service._login_limit("person@example.com", "127.0.0.1")
+
+    assert raised.value is error
+    session.rollback.assert_not_awaited()
 
 
 async def test_change_password_revokes_session(client: AsyncClient) -> None:

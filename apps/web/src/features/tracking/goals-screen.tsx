@@ -114,7 +114,7 @@ export function GoalsScreen() {
     targetAmount: Number(form.target_amount),
     currentAmount: Number(form.current_amount),
     monthlyContribution: Number(form.monthly_contribution),
-    monthlyIncome: Number(summaryQuery.data?.income ?? 0),
+    monthlyIncome: Number(summaryQuery.data?.planning_income ?? 0),
     monthlyExpenses: Number(summaryQuery.data?.expenses ?? 0),
     otherGoalContributions,
     isActive: form.status === "active",

@@ -62,6 +62,7 @@ async function request<T>(path: string, init: RequestInit = {}, mayRefresh = tru
     ...init,
     headers,
     credentials: "include",
+    cache: "no-store",
   });
 
   const refreshIneligible = ["/auth/login", "/auth/register", "/auth/refresh"].includes(path);
@@ -69,6 +70,7 @@ async function request<T>(path: string, init: RequestInit = {}, mayRefresh = tru
     const refreshed = await fetch(`${API_URL}/auth/refresh`, {
       method: "POST",
       credentials: "include",
+      cache: "no-store",
       headers: {
         "X-CSRF-Token": decodeURIComponent(readCookie("lifetracker_csrf") ?? ""),
       },

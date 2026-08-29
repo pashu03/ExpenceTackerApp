@@ -26,15 +26,18 @@ export function IncomeScreen() {
   const [editing, setEditing] = useState<Income | null>(null);
   const [form, setForm] = useState<IncomeInput>(emptyIncome);
   const query = useQuery({ queryKey: ["income", month], queryFn: () => trackingApi.income(month) });
+  const summaryQuery = useQuery({
+    queryKey: ["monthly-summary", month],
+    queryFn: () => trackingApi.summary(month),
+  });
 
   async function refreshMonthlySummary(months: Array<string | undefined>) {
+    await queryClient.invalidateQueries({
+      queryKey: ["monthly-summary"],
+      refetchType: "none",
+    });
     await Promise.all(
       [...new Set(months.filter((value): value is string => Boolean(value)))].map(async (value) => {
-        await queryClient.invalidateQueries({
-          queryKey: ["monthly-summary", value],
-          exact: true,
-          refetchType: "none",
-        });
         await queryClient.fetchQuery({
           queryKey: ["monthly-summary", value],
           queryFn: () => trackingApi.summary(value),
@@ -61,7 +64,7 @@ export function IncomeScreen() {
       setMonth(savedMonth);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["income"] }),
-        refreshMonthlySummary([savedMonth, previousMonth]),
+        refreshMonthlySummary([savedMonth, previousMonth, month, currentMonth()]),
         queryClient.invalidateQueries({ queryKey: ["calendar"] }),
         queryClient.invalidateQueries({ queryKey: ["insights"] }),
       ]);
@@ -79,7 +82,7 @@ export function IncomeScreen() {
       );
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["income"] }),
-        refreshMonthlySummary([deletedMonth]),
+        refreshMonthlySummary([deletedMonth, month, currentMonth()]),
         queryClient.invalidateQueries({ queryKey: ["calendar"] }),
         queryClient.invalidateQueries({ queryKey: ["insights"] }),
       ]);
@@ -103,7 +106,7 @@ export function IncomeScreen() {
         <div className="flex justify-end gap-3"><Button variant="ghost" onClick={close}>Cancel</Button><Button type="submit" disabled={save.isPending}>{save.isPending ? "Saving..." : editing ? "Save changes" : "Add income"}</Button></div>
       </form>
     </CardContent></Card> : null}
-    <div className="mb-6 grid gap-3 sm:grid-cols-[1fr_auto]"><Card className="shadow-none"><CardContent className="p-5"><p className="text-sm text-[var(--text-muted)]">Total income for selected month</p><p className="mt-2 text-2xl font-semibold text-[var(--success)]">{money.format(total)}</p></CardContent></Card><div className="min-w-48"><Input label="View month" type="month" value={month} onChange={(event) => setMonth(event.target.value)} /></div></div>
+    <div className="mb-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-[1fr_1fr_auto]"><Card className="shadow-none"><CardContent className="p-5"><p className="text-sm text-[var(--text-muted)]">Recorded income for selected month</p><p className="mt-2 text-2xl font-semibold text-[var(--success)]">{money.format(total)}</p><p className="mt-1 text-xs text-[var(--text-muted)]">Only income dated within {month} is included here.</p></CardContent></Card><Card className="shadow-none"><CardContent className="p-5"><p className="text-sm text-[var(--text-muted)]">Income used for planning</p><p className="mt-2 text-2xl font-semibold text-[var(--brand)]">{money.format(Number(summaryQuery.data?.planning_income ?? total))}</p><p className="mt-1 text-xs text-[var(--text-muted)]">{summaryQuery.data?.income_basis === "latest_salary" && summaryQuery.data.latest_salary_date ? `Latest salary from ${formatDate(summaryQuery.data.latest_salary_date)} because this month's recorded total is lower.` : "Uses the selected month's recorded income."}</p></CardContent></Card><div className="min-w-48"><Input label="View month" type="month" value={month} onChange={(event) => setMonth(event.target.value)} /></div></div>
     {query.isLoading ? <LoadingState label="Loading income..." /> : null}{query.isError ? <ErrorState retry={() => void query.refetch()} /> : null}
     {!query.isLoading && !query.isError && income.length === 0 ? <EmptyState title="No income this month" description="Add your salary or another income source to calculate monthly savings." action={<Button onClick={() => setOpen(true)}>Add income</Button>} /> : null}
     {income.length ? <Card><CardHeader><h2 className="font-semibold">Income history</h2></CardHeader><CardContent className="grid gap-2">{income.map((item) => <div key={item.id} className="flex items-center gap-3 rounded-xl border border-[var(--border)] p-3 sm:p-4"><span className="grid size-10 place-items-center rounded-xl bg-[var(--brand-soft)] text-[var(--success)]"><HandCoins size={18} /></span><div className="min-w-0 flex-1"><p className="truncate font-medium">{item.source}</p><p className="text-xs text-[var(--text-muted)]">{item.description ? `${item.description} · ` : ""}{formatDate(item.received_on)}</p></div><p className="font-semibold text-[var(--success)]">+{money.format(Number(item.amount))}</p><div className="flex"><Button variant="ghost" className="size-10 px-0" onClick={() => edit(item)} aria-label="Edit income"><Pencil size={16} /></Button><Button variant="ghost" className="size-10 px-0 text-[var(--danger)]" disabled={remove.isPending} onClick={() => { if (window.confirm("Delete this income record?")) remove.mutate(item); }} aria-label="Delete income"><Trash2 size={16} /></Button></div></div>)}</CardContent></Card> : null}

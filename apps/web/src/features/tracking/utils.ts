@@ -133,6 +133,32 @@ export function calculateGoalPlanPreview(input: GoalPlanPreviewInput): GoalPlanP
   };
 }
 
+export interface WhatIfResult {
+  currentMonths: number | null;
+  improvedMonths: number | null;
+  monthsEarlier: number;
+}
+
+export function calculateWhatIf(
+  remainingAmount: number,
+  currentContribution: number,
+  extraMonthlySaving: number,
+): WhatIfResult {
+  const remaining = validAmount(remainingAmount);
+  const contribution = validAmount(currentContribution);
+  const extra = validAmount(extraMonthlySaving);
+  const currentMonths = contribution > 0 ? Math.ceil(remaining / contribution) : null;
+  const improvedMonths = contribution + extra > 0 ? Math.ceil(remaining / (contribution + extra)) : null;
+  return {
+    currentMonths,
+    improvedMonths,
+    monthsEarlier:
+      currentMonths !== null && improvedMonths !== null
+        ? Math.max(currentMonths - improvedMonths, 0)
+        : 0,
+  };
+}
+
 export function moneyFormatter(user: User | null) {
   return new Intl.NumberFormat(undefined, {
     style: "currency",

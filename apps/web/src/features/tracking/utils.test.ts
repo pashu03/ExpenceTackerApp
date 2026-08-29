@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateGoalPlanPreview, formatGoalDuration } from "./utils";
+import { calculateGoalPlanPreview, calculateWhatIf, formatGoalDuration } from "./utils";
 
 describe("goal plan calculations", () => {
   it("calculates duration and an affordable contribution from live finances", () => {
@@ -41,5 +41,13 @@ describe("goal plan calculations", () => {
 
   it("formats long estimates in years and months", () => {
     expect(formatGoalDuration(760)).toBe("About 2 years 1 month");
+  });
+
+  it("shows how an expense reduction accelerates a goal", () => {
+    expect(calculateWhatIf(150_000, 2_000, 3_000)).toEqual({
+      currentMonths: 75,
+      improvedMonths: 30,
+      monthsEarlier: 45,
+    });
   });
 });

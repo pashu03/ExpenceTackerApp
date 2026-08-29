@@ -176,6 +176,54 @@ async def test_goal_recommendations_share_available_cash_proportionally(
     assert all(item["affordability_status"] == "overcommitted" for item in projections.values())
 
 
+async def test_latest_salary_is_used_for_planning_without_changing_recorded_income(
+    client: AsyncClient,
+) -> None:
+    await register(client)
+    headers = csrf_headers(client)
+    salary = await client.post(
+        "/api/v1/income",
+        headers=headers,
+        json={"amount": "30000", "source": "Salary", "received_on": "2026-09-07"},
+    )
+    assert salary.status_code == 201, salary.text
+    goal = await client.post(
+        "/api/v1/goals",
+        headers=headers,
+        json={
+            "name": "Bike",
+            "target_amount": "200000",
+            "current_amount": "50000",
+            "monthly_contribution": "5000",
+        },
+    )
+    assert goal.status_code == 201, goal.text
+
+    summary = await client.get("/api/v1/dashboard/summary?month=2026-08")
+    assert summary.status_code == 200, summary.text
+    data = summary.json()["data"]
+
+    assert data["income"] == "0"
+    assert data["planning_income"] == "30000.00"
+    assert data["income_basis"] == "latest_salary"
+    assert data["latest_salary_date"] == "2026-09-07"
+    assert data["goal_projections"][0]["estimated_months"] == 30
+    assert data["goal_projections"][0]["income_percentage"] == "16.7"
+    assert data["goal_projections"][0]["priority_rank"] == 1
+    assert data["salary_allocation"]["goal_savings"] == "5000.00"
+    assert data["salary_allocation"]["emergency_fund"] == "3000.00"
+    assert data["safe_to_spend"] == "22000.00"
+    assert 0 <= data["financial_health"]["score"] <= 100
+
+    duplicate = await client.post(
+        "/api/v1/income",
+        headers=headers,
+        json={"amount": "30000", "source": "salary", "received_on": "2026-09-07"},
+    )
+    assert duplicate.status_code == 409
+    assert duplicate.json()["code"] == "DUPLICATE_INCOME"
+
+
 async def test_journal_allows_only_one_entry_per_day(client: AsyncClient) -> None:
     await register(client)
     headers = csrf_headers(client)

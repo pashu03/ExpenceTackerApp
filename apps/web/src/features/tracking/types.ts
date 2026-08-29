@@ -144,17 +144,61 @@ export interface GoalProjection {
   income_percentage: string | null;
   affordability_status: "on_track" | "overcommitted" | "needs_income" | "not_configured";
   recommendation: string;
+  priority_rank: number;
+  priority_reason: string;
+}
+
+export interface SalaryAllocation {
+  essential_expenses: string;
+  goal_savings: string;
+  emergency_fund: string;
+  flexible_spending: string;
+  total_allocated: string;
+  unallocated: string;
+}
+
+export interface SpendingAlert {
+  severity: "info" | "warning" | "danger";
+  title: string;
+  description: string;
+  category: string | null;
+}
+
+export interface SpendingForecast {
+  projected_monthly_spending: string;
+  historical_monthly_average: string;
+  variance_percentage: string | null;
+  months_analyzed: number;
+  alerts: SpendingAlert[];
+}
+
+export interface FinancialHealth {
+  score: number;
+  label: string;
+  cash_flow: number;
+  spending_control: number;
+  emergency_readiness: number;
+  goal_planning: number;
+  tracking_consistency: number;
 }
 
 export interface MonthlySummary {
   month: string;
   income: string;
+  planning_income: string;
+  income_basis: "recorded_month" | "latest_salary";
+  latest_salary_amount: string | null;
+  latest_salary_date: string | null;
   expenses: string;
   net_savings: string;
   savings_rate: string | null;
   available_after_expenses: string;
   planned_goal_contributions: string;
   recommended_spending_limit: string;
+  safe_to_spend: string;
+  salary_allocation: SalaryAllocation;
+  spending_forecast: SpendingForecast;
+  financial_health: FinancialHealth;
   today_expenses: string;
   active_goals: number;
   categories: CategoryTotal[];
