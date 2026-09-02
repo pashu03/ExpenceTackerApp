@@ -23,13 +23,23 @@ import {
   moneyFormatter,
 } from "./utils";
 
-const emptyExpense = (): ExpenseInput => ({
+const emptyExpense = (spentOn = localDate()): ExpenseInput => ({
   amount: "",
   category: "Food & Dining",
   description: "",
   notes: "",
-  spent_on: localDate(),
+  spent_on: spentOn,
 });
+
+function firstDateOfMonth(month: string): string {
+  return `${month}-01`;
+}
+
+function lastDateOfMonth(month: string): string {
+  const [year, monthNumber] = month.split("-").map(Number);
+  const day = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
+  return `${month}-${String(day).padStart(2, "0")}`;
+}
 
 export function ExpensesScreen({ startOpen = false }: { startOpen?: boolean }) {
   const queryClient = useQueryClient();
@@ -37,17 +47,23 @@ export function ExpensesScreen({ startOpen = false }: { startOpen?: boolean }) {
   const { user } = useAuth();
   const money = moneyFormatter(user);
   const [month, setMonth] = useState(currentMonth());
+  const [historyDate, setHistoryDate] = useState(localDate());
+  const [entryDate, setEntryDate] = useState(localDate());
   const [formOpen, setFormOpen] = useState(startOpen);
   const [editing, setEditing] = useState<Expense | null>(null);
-  const [form, setForm] = useState<ExpenseInput>(emptyExpense);
+  const [form, setForm] = useState<ExpenseInput>(() => emptyExpense(entryDate));
   const query = useQuery({
-    queryKey: ["expenses", month],
-    queryFn: () => trackingApi.expenses(month),
+    queryKey: ["expenses", month, historyDate],
+    queryFn: () => trackingApi.expenses(month, historyDate),
+  });
+  const summaryQuery = useQuery({
+    queryKey: ["monthly-summary", month],
+    queryFn: () => trackingApi.summary(month),
   });
   const save = useMutation({
     mutationFn: ({ input, id }: { input: ExpenseInput; id?: string }) =>
       trackingApi.saveExpense(input, id),
-    onSuccess: async (_, variables) => {
+    onSuccess: async (saved, variables) => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["expenses"] }),
         queryClient.invalidateQueries({ queryKey: ["monthly-summary"] }),
@@ -56,7 +72,12 @@ export function ExpensesScreen({ startOpen = false }: { startOpen?: boolean }) {
         queryClient.invalidateQueries({ queryKey: ["insights"] }),
       ]);
       showToast(variables.id ? "Expense updated." : "Expense added.");
-      closeForm();
+      if (variables.id) {
+        closeForm();
+      } else {
+        setEntryDate(saved.spent_on);
+        setForm(emptyExpense(saved.spent_on));
+      }
     },
   });
   const remove = useMutation({
@@ -76,7 +97,7 @@ export function ExpensesScreen({ startOpen = false }: { startOpen?: boolean }) {
 
   function closeForm() {
     setEditing(null);
-    setForm(emptyExpense());
+    setForm(emptyExpense(entryDate));
     setFormOpen(false);
     save.reset();
   }
@@ -95,10 +116,13 @@ export function ExpensesScreen({ startOpen = false }: { startOpen?: boolean }) {
   }
 
   const expenses = query.data ?? [];
-  const total = expenses.reduce((sum, item) => sum + Number(item.amount), 0);
-  const today = expenses
-    .filter((item) => item.spent_on === localDate())
-    .reduce((sum, item) => sum + Number(item.amount), 0);
+  const selectedDateTotal = expenses.reduce((sum, item) => sum + Number(item.amount), 0);
+  const monthTotal = Number(summaryQuery.data?.expenses ?? 0);
+
+  function changeHistoryMonth(value: string) {
+    setMonth(value);
+    setHistoryDate(firstDateOfMonth(value));
+  }
 
   return (
     <div>
@@ -155,7 +179,10 @@ export function ExpensesScreen({ startOpen = false }: { startOpen?: boolean }) {
                   type="date"
                   required
                   value={form.spent_on}
-                  onChange={(event) => setForm({ ...form, spent_on: event.target.value })}
+                  onChange={(event) => {
+                    setEntryDate(event.target.value);
+                    setForm({ ...form, spent_on: event.target.value });
+                  }}
                 />
               </div>
               <Input
@@ -186,20 +213,21 @@ export function ExpensesScreen({ startOpen = false }: { startOpen?: boolean }) {
         </Card>
       ) : null}
 
-      <div className="mb-6 grid gap-3 sm:grid-cols-[1fr_1fr_auto]">
-        <Card className="shadow-none"><CardContent className="p-5"><p className="text-sm text-[var(--text-muted)]">Today</p><p className="mt-2 text-2xl font-semibold">{money.format(today)}</p></CardContent></Card>
-        <Card className="shadow-none"><CardContent className="p-5"><p className="text-sm text-[var(--text-muted)]">Selected month</p><p className="mt-2 text-2xl font-semibold">{money.format(total)}</p></CardContent></Card>
-        <div className="min-w-48 self-stretch"><Input label="View month" type="month" value={month} onChange={(event) => setMonth(event.target.value)} /></div>
+      <div className="mb-6 grid gap-3 lg:grid-cols-[1fr_1fr_auto_auto]">
+        <Card className="shadow-none"><CardContent className="p-5"><p className="text-sm text-[var(--text-muted)]">Selected date</p><p className="mt-2 text-2xl font-semibold">{money.format(selectedDateTotal)}</p></CardContent></Card>
+        <Card className="shadow-none"><CardContent className="p-5"><p className="text-sm text-[var(--text-muted)]">Selected month</p><p className="mt-2 text-2xl font-semibold">{money.format(monthTotal)}</p></CardContent></Card>
+        <div className="min-w-48 self-stretch"><Input label="View month" type="month" value={month} onChange={(event) => changeHistoryMonth(event.target.value)} /></div>
+        <div className="min-w-48 self-stretch"><Input label="View date" type="date" value={historyDate} min={firstDateOfMonth(month)} max={lastDateOfMonth(month)} onChange={(event) => setHistoryDate(event.target.value)} /></div>
       </div>
 
       {query.isLoading ? <LoadingState label="Loading expenses..." /> : null}
       {query.isError ? <ErrorState retry={() => void query.refetch()} /> : null}
       {!query.isLoading && !query.isError && expenses.length === 0 ? (
-        <EmptyState title="No expenses this month" description="Add your first expense to start seeing daily and monthly totals." action={<Button onClick={() => setFormOpen(true)}>Add expense</Button>} />
+        <EmptyState title="No expenses on this date" description="Choose another date or add an expense for this day." action={<Button onClick={() => setFormOpen(true)}>Add expense</Button>} />
       ) : null}
       {expenses.length > 0 ? (
         <Card>
-          <CardHeader><h2 className="font-semibold">Expense history</h2><p className="mt-1 text-sm text-[var(--text-muted)]">{expenses.length} recorded {expenses.length === 1 ? "expense" : "expenses"}</p></CardHeader>
+          <CardHeader><h2 className="font-semibold">{formatDate(historyDate)}</h2><p className="mt-1 text-sm text-[var(--text-muted)]">{expenses.length} recorded {expenses.length === 1 ? "expense" : "expenses"}</p></CardHeader>
           <CardContent className="grid gap-2">
             {expenses.map((item) => (
               <div key={item.id} className="flex items-center gap-3 rounded-xl border border-[var(--border)] p-3 sm:p-4">

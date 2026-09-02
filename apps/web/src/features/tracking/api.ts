@@ -17,8 +17,10 @@ import type {
 } from "./types";
 
 export const trackingApi = {
-  async expenses(month: string) {
-    return (await apiClient.get<DataResponse<Expense[]>>(`/expenses?month=${month}`)).data;
+  async expenses(month: string, spentOn?: string) {
+    const params = new URLSearchParams({ month });
+    if (spentOn) params.set("spent_on", spentOn);
+    return (await apiClient.get<DataResponse<Expense[]>>(`/expenses?${params}`)).data;
   },
   async saveExpense(input: ExpenseInput, id?: string) {
     const response = id

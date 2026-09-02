@@ -96,6 +96,24 @@ async def test_core_records_are_created_updated_listed_and_deleted(client: Async
     ).status_code == 200
 
 
+async def test_expenses_can_be_filtered_to_one_day_within_a_month(client: AsyncClient) -> None:
+    await register(client)
+    headers = csrf_headers(client)
+    for amount, spent_on in (("120", "2026-08-03"), ("80", "2026-08-03"), ("500", "2026-08-04")):
+        response = await client.post(
+            "/api/v1/expenses",
+            headers=headers,
+            json={"amount": amount, "category": "Food & Dining", "spent_on": spent_on},
+        )
+        assert response.status_code == 201, response.text
+
+    response = await client.get("/api/v1/expenses?month=2026-08&spent_on=2026-08-03")
+
+    assert response.status_code == 200, response.text
+    assert {item["amount"] for item in response.json()["data"]} == {"80.00", "120.00"}
+    assert {item["spent_on"] for item in response.json()["data"]} == {"2026-08-03"}
+
+
 async def test_goal_plan_reacts_to_income_expenses_and_contribution(client: AsyncClient) -> None:
     await register(client)
     headers = csrf_headers(client)

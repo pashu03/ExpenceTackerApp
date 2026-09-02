@@ -91,15 +91,18 @@ class TrackingService:
     async def _list(self, query: Select[tuple[ModelT]]) -> list[ModelT]:
         return list((await self.session.scalars(query)).all())
 
-    async def list_expenses(self, month: str | None) -> list[Expense]:
+    async def list_expenses(self, month: str | None, spent_on: date | None = None) -> list[Expense]:
         _, start, end = month_bounds(month)
+        filters = [
+            Expense.user_id == self.user_id,
+            Expense.spent_on >= start,
+            Expense.spent_on <= end,
+        ]
+        if spent_on:
+            filters.append(Expense.spent_on == spent_on)
         return await self._list(
             select(Expense)
-            .where(
-                Expense.user_id == self.user_id,
-                Expense.spent_on >= start,
-                Expense.spent_on <= end,
-            )
+            .where(*filters)
             .order_by(Expense.spent_on.desc(), Expense.created_at.desc())
         )
 

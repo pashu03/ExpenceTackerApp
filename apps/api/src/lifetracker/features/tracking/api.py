@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Query, status
@@ -51,6 +52,7 @@ from lifetracker.features.tracking.service import TrackingService
 
 router = APIRouter(tags=["tracking"])
 MonthQuery = Annotated[str | None, Query(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")]
+ExpenseDateQuery = Annotated[date | None, Query()]
 
 
 def service(session: SessionDependency, current_user: CurrentUser) -> TrackingService:
@@ -59,9 +61,12 @@ def service(session: SessionDependency, current_user: CurrentUser) -> TrackingSe
 
 @router.get("/expenses", response_model=ExpenseListResponse)
 async def list_expenses(
-    session: SessionDependency, current_user: CurrentUser, month: MonthQuery = None
+    session: SessionDependency,
+    current_user: CurrentUser,
+    month: MonthQuery = None,
+    spent_on: ExpenseDateQuery = None,
 ) -> ExpenseListResponse:
-    items = await service(session, current_user).list_expenses(month)
+    items = await service(session, current_user).list_expenses(month, spent_on)
     return ExpenseListResponse(data=[ExpenseRead.model_validate(item) for item in items])
 
 

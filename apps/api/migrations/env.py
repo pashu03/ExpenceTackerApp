@@ -1,11 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from logging.config import fileConfig
+from pathlib import Path
 
 from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
+
+# Alembic can be launched from the repository root, where the application's
+# ``src`` directory is not otherwise importable. Resolve it from this file so
+# migrations do not depend on a previously installed editable package path.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from lifetracker.core.config import get_settings
 from lifetracker.db.base import Base
